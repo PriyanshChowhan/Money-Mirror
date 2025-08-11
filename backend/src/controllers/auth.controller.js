@@ -44,7 +44,7 @@ export const handleGoogleCallback = async (req, res) => {
       });
     } else {
       if (tokens.access_token) user.accessToken = tokens.access_token;
-      if (tokens.refresh_token) user.refreshToken = tokens.refresh_token;
+      if (tokens.refresh_token) user.refreshToken = tokens.refresh_token || user.refreshToken;
       await user.save();
     }
 
