@@ -8,11 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
+ARG VITE_API_URL
+
 # Copy the rest of the app
 COPY . .
 
 # Build the production-ready files
-RUN npm run build
+RUN VITE_API_URL=${VITE_API_URL} npm run build
 
 # --- Stage 2: Serve with nginx ---
 FROM nginx:alpine

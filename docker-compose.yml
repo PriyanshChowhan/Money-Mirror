@@ -21,6 +21,9 @@
 
 version: '3.8'
 
+env_file:
+  - .env.production
+
 services:
   backend:
     build: ./backend
@@ -30,7 +33,11 @@ services:
     restart: always
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
     expose:           # expose to internal network only
       - "80"
     volumes:
