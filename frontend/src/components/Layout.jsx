@@ -5,10 +5,11 @@ import { Outlet } from 'react-router-dom';
 import axios from 'axios';
 
 const Layout = () => {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [user, setUser] = useState({ name: 'User', email: '' });
 
   useEffect(() => {
-    axios.get('http://money-mirror.xyz/api/auth/profile', {
+    axios.get(`${API_BASE_URL}/api/auth/profile`, {
       withCredentials: true
     })
     .then((res) => {

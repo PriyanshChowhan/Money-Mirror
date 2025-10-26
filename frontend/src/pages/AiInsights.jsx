@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, AlertTriangle, Info, DollarSign, Calendar, Clock, ShoppingBag, Car, Smartphone, Music, Star, Target, Heart, Briefcase, Coffee } from 'lucide-react';
 
 const AIInsightsPage = () => {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const [insightsData, setInsightsData] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -14,7 +15,7 @@ const AIInsightsPage = () => {
 
   const fetchInsights = async () => {
     try {
-      const response = await fetch('http://money-mirror.xyz/api/insights/ai', {
+      const response = await fetch(`${API_BASE_URL}/api/insights/ai`, {
         credentials: 'include'
       });
       const res = await response.json();

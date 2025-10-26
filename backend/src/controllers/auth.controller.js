@@ -51,18 +51,22 @@ export const handleGoogleCallback = async (req, res) => {
     // Step 2.4: Generate JWT (your own app token)
     const token = generateToken(user._id, user.name);
 
+    const isProduction = process.env.NODE_ENV === 'production';
+    // Determine redirect URL and use FRONTEND_URL if set
+    const frontendRedirectBase = process.env.FRONTEND_URL || (isProduction ? 'https://money-mirror.xyz' : 'http://localhost:5173');
+
     // Step 2.5: Send JWT as cookie (or in response)
     res.cookie('jwt', token, {
       httpOnly: true,
       // secure: process.env.NODE_ENV === 'production',
-      secure: false,
-      sameSite: 'Lax',
+      secure: isProduction,
+      sameSite: isProduction ? 'None' : 'Lax',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     // res.redirect('http://localhost:5173/dashboard');
     // res.redirect('http://13.48.84.59/dashboard');
-    res.redirect('http://money-mirror.xyz/dashboard');
+    res.redirect(`${frontendRedirectBase}/dashboard`);
 
 
   } catch (error) {

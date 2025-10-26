@@ -13,6 +13,7 @@ import {
     Filter } from 'lucide-react';
 
 const Dashboard = () => {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || '';
     const [transactions, setTransactions] = useState([])
     const [selectedPeriod, setSelectedPeriod] = useState('last-12-months');
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -22,7 +23,7 @@ const Dashboard = () => {
     const [userName, setUserName] = useState('User');
 
     useEffect(() => {
-        axios.get(`http://money-mirror.xyz/api/transactions/getTransactionsByRange?range=${selectedPeriod}`, {
+        axios.get(`${API_BASE_URL}/api/transactions/getTransactionsByRange?range=${selectedPeriod}`, {
             withCredentials : true
         })
         .then((res) => {       

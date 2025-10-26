@@ -4,9 +4,11 @@ import cookieParser from 'cookie-parser';
 
 const app = express()
 
+const allowedOrigin = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? 'https://money-mirror.xyz' : 'http://localhost:5173');
+
 app.use(cookieParser());
 app.use(cors({
-    origin:'http://localhost:5173', 
+    origin: allowedOrigin, 
     credentials : true
 }))
 

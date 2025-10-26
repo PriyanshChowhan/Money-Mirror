@@ -969,7 +969,7 @@ const generateInsightData = async (Transaction, userId) => {
 // Initialize Gemini AI model
 const initializeGeminiModel = (geminiApiKey) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    return genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 };
 
 // Enhanced insight parser with action items

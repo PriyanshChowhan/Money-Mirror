@@ -16,6 +16,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const Navbar = ({user}) => {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -32,7 +33,7 @@ const Navbar = ({user}) => {
 
   const handleLogout = async () => {
   try {
-    await axios.post('http://money-mirror.xyz/api/auth/logout', {}, {
+    await axios.post(`${API_BASE_URL}/api/auth/logout`, {}, {
       withCredentials: true
     });
 

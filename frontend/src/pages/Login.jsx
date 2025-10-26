@@ -128,9 +128,9 @@ import React, { useState } from 'react';
 
 function Login() {
   const [isLogin, setIsLogin] = useState(false);
+  const API_BASE_URL = import.meta.env.VITE_API_URL || '';
   const handleGoogleLogin = () => {
-    window.location.href = 'http://money-mirror.xyz/api/auth/google'; 
-    
+    window.location.href = `${API_BASE_URL}/api/auth/google`;
   };
 
   return (

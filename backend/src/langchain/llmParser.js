@@ -7,7 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
  */
 export async function parseEmailsWithLLM({ rawEmails, geminiConfig }) {
   const genAI = new GoogleGenerativeAI(geminiConfig.geminiApi);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const compiledText = rawEmails.join("\n\n");
 

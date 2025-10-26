@@ -4,6 +4,7 @@
 import axios from 'axios';
 
   const FinancialInsights = () => {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || '';
     const [activeTab, setActiveTab] = useState('overview');
     const [animatedValue, setAnimatedValue] = useState(0);
     const [insightData, setInsightData] = useState({
@@ -17,7 +18,7 @@ import axios from 'axios';
 
 
     useEffect(() => {
-        axios.get(`http://money-mirror.xyz/api/insights/raw`, {
+        axios.get(`${API_BASE_URL}/api/insights/raw`, {
             withCredentials : true
         })
         .then((res) => {       
