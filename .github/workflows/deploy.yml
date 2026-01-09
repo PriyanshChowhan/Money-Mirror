@@ -58,7 +58,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            /home/ubuntu/Money-Mirror/docker-compose.yml
+            cd /home/ubuntu/Money-Mirror
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
             docker-compose down
