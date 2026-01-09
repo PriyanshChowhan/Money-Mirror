@@ -38,7 +38,7 @@ services:
     restart: always
 
   backend:
-    image: yourdockerusername/app-backend:latest
+    image: priyanshchowhan/app-backend:latest
     container_name: backend
     env_file:
       - ./backend/.env.production
@@ -47,7 +47,7 @@ services:
     restart: always
 
   frontend:
-    image: yourdockerusername/app-frontend:latest
+    image: priyanshchowhan/app-frontend:latest
     expose:
       - "80"
     restart: always
