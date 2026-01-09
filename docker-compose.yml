@@ -1,21 +1,53 @@
+# version: '3.8'
+
+# services:
+#   backend:
+#     build: ./backend
+#     container_name: backend
+#     ports:
+#       - "5000:5000"
+#     restart: always
+#     env_file:
+#       - ./backend/.env.production
+
+#   frontend:
+#     build: ./frontend
+#     ports:
+#       - "80:80"
+#     volumes:
+#       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf
+#     depends_on:
+#       - backend
+#     restart: always
+
 version: '3.8'
 
 services:
-  backend:
-    build: ./backend
-    container_name: backend
-    ports:
-      - "5000:5000"
-    restart: always
-    env_file:
-      - ./backend/.env.production
-
-  frontend:
-    build: ./frontend
+  nginx:
+    image: nginx:latest
+    container_name: nginx_ssl
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+      - /etc/letsencrypt:/etc/letsencrypt
     depends_on:
+      - frontend
       - backend
+    restart: always
+
+  backend:
+    image: yourdockerusername/app-backend:latest
+    container_name: backend
+    env_file:
+      - ./backend/.env.production
+    expose:
+      - "5000"
+    restart: always
+
+  frontend:
+    image: yourdockerusername/app-frontend:latest
+    expose:
+      - "80"
     restart: always
