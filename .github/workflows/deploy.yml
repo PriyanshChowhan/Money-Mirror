@@ -59,6 +59,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/Money-Mirror
+            git pull origin main
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
             docker-compose down
