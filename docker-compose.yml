@@ -26,6 +26,7 @@ services:
 
   frontend:
     image: priyanshchowhan/app-frontend:latest
+    container_name: money-mirror_frontend_1
     expose:
       - "80"
     restart: always

@@ -59,16 +59,17 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/Money-Mirror
-            # Force kill any containers still using port 80
-            docker ps -a | grep -i nginx || true
+            # Kill all containers
             docker kill $(docker ps -q) 2>/dev/null || true
+            docker rm -f $(docker ps -aq) 2>/dev/null || true
+            # Find and kill any process using port 80
+            sudo fuser -k 80/tcp 2>/dev/null || true
+            sudo lsof -ti :80 | xargs kill -9 2>/dev/null || true
+            sleep 5
             # Aggressive cleanup
             docker system prune -af --volumes
             # Fix nginx config directory issue
-            rm -rf nginx/nginx.conf 2>/dev/null || true
-            # Stop and remove all containers
-            docker-compose down -v --remove-orphans 2>/dev/null || true
-            sleep 3
+            sudo rm -rf nginx/nginx.conf 2>/dev/null || true
             # Update code and deploy
             git fetch origin main
             git reset --hard origin/main
