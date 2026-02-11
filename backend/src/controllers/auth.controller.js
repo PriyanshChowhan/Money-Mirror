@@ -1,5 +1,6 @@
 import { google } from 'googleapis';
 import User from '../models/user.js';
+import SyncLog from '../models/syncLog.js';
 import { getAuthURL, getTokensFromCode, getAuthenticatedClient } from '../helpers/gmail/auth.js';
 import { generateToken } from '../utils/generateTokens.js';
 import { syncEmailsForUser } from '../cron/emailSyncCron.js';
@@ -44,6 +45,19 @@ export const handleGoogleCallback = async (req, res) => {
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
       });
+      
+      // Create initial sync log dated 7 days ago
+      // This allows fetching recent emails but avoids years of history
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      
+      await SyncLog.create({
+        user: user._id,
+        fetchedAt: weekAgo,
+        messageCount: 0,
+        notes: 'Initial sync log set to 7 days ago. Will fetch recent emails but not full history.',
+      });
+      console.log(`New user created: ${user.email}, initial sync log set to 7 days ago`);
     } else {
       if (tokens.access_token) user.accessToken = tokens.access_token;
       if (tokens.refresh_token) user.refreshToken = tokens.refresh_token || user.refreshToken;

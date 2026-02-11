@@ -51,14 +51,16 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     console.log("Saved transaction:", saved._id);
   }
 
-  if (savedTransactions.length > 0) {
-    await SyncLog.create({
-      user: user._id,
-      fetchedAt: new Date(),
-      messageCount: savedTransactions.length,
-      notes: `Synced ${savedTransactions.length} new transactions.`,
-    });
-  }
+  // Always create a sync log to track when we last checked
+  // This prevents re-querying the same emails repeatedly
+  await SyncLog.create({
+    user: user._id,
+    fetchedAt: new Date(),
+    messageCount: savedTransactions.length,
+    notes: savedTransactions.length > 0 
+      ? `Synced ${savedTransactions.length} new transactions.`
+      : 'Sync completed, no new transactions found.',
+  });
 
   return savedTransactions;
 };

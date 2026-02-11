@@ -11,15 +11,21 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
   const lastLog = await SyncLog.findOne({ user: userId }).sort({ fetchedAt: -1 });
   const afterDate = lastLog ? new Date(lastLog.fetchedAt) : null;
 
+  // More flexible query - emails with financial keywords in subject OR body
   let gmailQuery = `
-    (subject:(payment OR transaction OR receipt OR invoice OR order OR subscription OR refund OR charged OR purchase OR spent OR credited OR debited OR billing OR bank OR transfer OR salary OR income)) 
-    AND
-    (body:(₹ OR INR OR payment OR amount OR charged OR credited OR debited OR subscription OR billing))
+    subject:(payment OR transaction OR receipt OR invoice OR order OR subscription OR refund OR charged OR purchase OR spent OR credited OR debited OR billing OR bank OR transfer OR salary OR income OR paid OR debit OR credit)
   `.trim();
 
   if (afterDate) {
-    const afterTimestampSeconds = Math.floor(afterDate.getTime() / 1000);
-    gmailQuery += ` after:${afterTimestampSeconds}`;
+    // Gmail API expects date in YYYY/MM/DD format for after: parameter
+    const year = afterDate.getFullYear();
+    const month = String(afterDate.getMonth() + 1).padStart(2, '0');
+    const day = String(afterDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}/${month}/${day}`;
+    gmailQuery += ` after:${dateStr}`;
+    console.log(`Fetching emails after: ${dateStr} (${afterDate.toISOString()})`);
+  } else {
+    console.log('No last sync log found - fetching recent emails');
   }
 
   console.log("Gmail query:", gmailQuery);
@@ -32,7 +38,12 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
   });
 
   const messages = res.data.messages || [];
-  if (messages.length === 0) return [];
+  console.log(`Found ${messages.length} messages from Gmail API`);
+  
+  if (messages.length === 0) {
+    console.log('No messages matched the query');
+    return [];
+  }
 
   const messageIds = messages.map(msg => msg.id);
   const existing = await Transaction.find({
@@ -41,6 +52,8 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
   }).select('gmailMessageId');
 
   const seenIds = new Set(existing.map(t => t.gmailMessageId));
+  console.log(`${existing.length} messages already exist in database`);
+  
   const newEmails = [];
 
   for (const msg of messages) {
@@ -48,14 +61,21 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
 
     const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id });
     const payload = fullMsg.data.payload;
-    if (!payload) continue;
+    if (!payload) {
+      console.warn(`No payload for message ${msg.id}`);
+      continue;
+    }
 
     const parts = payload.parts || [];
     const bodyData =
       payload.body?.data ||
-      parts.find(p => p.mimeType === 'text/plain')?.body?.data;
+      parts.find(p => p.mimeType === 'text/plain')?.body?.data ||
+      parts.find(p => p.mimeType === 'text/html')?.body?.data;
 
-    if (!bodyData) continue;
+    if (!bodyData) {
+      console.warn(`No body data found for message ${msg.id}, snippet: ${fullMsg.data.snippet}`);
+      continue;
+    }
 
     const decoded = Buffer.from(bodyData, 'base64').toString('utf-8');
 
@@ -67,5 +87,6 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
     });
   }
 
+  console.log(`Returning ${newEmails.length} new emails for processing`);
   return newEmails;
 };
