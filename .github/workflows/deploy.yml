@@ -59,8 +59,14 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             cd /home/ubuntu/Money-Mirror
-            git pull origin main
+            # Clean up disk space
+            docker system prune -af --volumes
+            # Stop and remove all containers
+            docker-compose down -v --remove-orphans
+            sleep 2
+            # Update code and deploy
+            git fetch origin main
+            git reset --hard origin/main
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
             docker pull ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
-            docker-compose down
             docker-compose up -d
