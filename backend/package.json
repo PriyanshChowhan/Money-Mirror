@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test:k6:smoke": "k6 run --env SCENARIO=smoke k6-test.js",
+    "test:k6:load": "k6 run --env SCENARIO=load k6-test.js",
+    "test:k6:stress": "k6 run --env SCENARIO=stress k6-test.js",
+    "test:k6:spike": "k6 run --env SCENARIO=spike k6-test.js"
   },
   "author": "",
   "license": "ISC",

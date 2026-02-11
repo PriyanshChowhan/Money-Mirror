@@ -13,7 +13,6 @@ export const getAllTransactionsByRange = async (req, res) => {
 
     let startDate, endDate = new Date();
 
-    // Handle predefined ranges
     if (range === 'this-month') {
       startDate = dayjs().startOf('month').toDate();
       endDate = dayjs().endOf('month').toDate();
@@ -24,16 +23,13 @@ export const getAllTransactionsByRange = async (req, res) => {
       startDate = dayjs().subtract(12, 'month').startOf('month').toDate();
     }
 
-    // Override with custom start/end dates (if provided)
     if (start) startDate = new Date(start);
     if (end) endDate = new Date(end);
 
-    // Build date filter
     const dateFilter = {};
     if (startDate) dateFilter.$gte = startDate;
     if (endDate) dateFilter.$lte = endDate;
 
-    // Build final MongoDB query
     const filter = {
       user: userId,
       ...(Object.keys(dateFilter).length && { date: dateFilter })

@@ -21,6 +21,26 @@ const PrivateRoute = () => {
       .catch(() => setAuth(false));
   }, []);
 
+  // Auto-logout when user leaves the page
+  useEffect(() => {
+    const handleBeforeUnload = async () => {
+      try {
+        await axios.post('/api/auth/logout', {}, { 
+          withCredentials: true 
+        });
+      } catch (err) {
+        console.error('Auto-logout failed:', err);
+      }
+    };
+
+    // Logout on page unload (leaving, closing tab, etc.)
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
   // Loading state
   if (auth === null) {
     return (

@@ -1,626 +1,3 @@
-// import mongoose from 'mongoose';
-// import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// // ================================
-// // 1. MONGODB AGGREGATION FUNCTIONS
-// // ================================
-
-// // Monthly spending summary with trends
-// const getMonthlySpendingSummary = async (Transaction, userId, months = 12) => {
-//     const startDate = new Date();
-//     startDate.setMonth(startDate.getMonth() - months);
-
-//     return await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 date: { $gte: startDate },
-//                 amount: { $gt: 0 }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: {
-//                     year: { $year: "$date" },
-//                     month: { $month: "$date" }
-//                 },
-//                 totalSpent: { $sum: "$amount" },
-//                 transactionCount: { $sum: 1 },
-//                 avgTransaction: { $avg: "$amount" },
-//                 maxTransaction: { $max: "$amount" },
-//                 categories: { $addToSet: "$category" }
-//             }
-//         },
-//         {
-//             $sort: { "_id.year": 1, "_id.month": 1 }
-//         },
-//         {
-//             $project: {
-//                 _id: 0,
-//                 month: "$_id.month",
-//                 year: "$_id.year",
-//                 totalSpent: { $round: ["$totalSpent", 2] },
-//                 transactionCount: 1,
-//                 avgTransaction: { $round: ["$avgTransaction", 2] },
-//                 maxTransaction: { $round: ["$maxTransaction", 2] },
-//                 uniqueCategories: { $size: "$categories" }
-//             }
-//         }
-//     ]);
-// };
-
-// // Category-wise spending analysis
-// const getCategoryAnalysis = async (Transaction, userId, days = 30) => {
-//     const startDate = new Date();
-//     startDate.setDate(startDate.getDate() - days);
-
-//     return await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 date: { $gte: startDate },
-//                 amount: { $gt: 0 },
-//                 category: { $exists: true, $ne: null }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: "$category",
-//                 totalSpent: { $sum: "$amount" },
-//                 transactionCount: { $sum: 1 },
-//                 avgAmount: { $avg: "$amount" },
-//                 merchants: { $addToSet: "$merchant" },
-//                 dates: { $push: "$date" }
-//             }
-//         },
-//         {
-//             $addFields: {
-//                 merchantCount: { $size: "$merchants" },
-//                 firstTransaction: { $min: "$dates" },
-//                 lastTransaction: { $max: "$dates" }
-//             }
-//         },
-//         {
-//             $project: {
-//                 _id: 0,
-//                 category: "$_id",
-//                 totalSpent: { $round: ["$totalSpent", 2] },
-//                 transactionCount: 1,
-//                 avgAmount: { $round: ["$avgAmount", 2] },
-//                 merchantCount: 1,
-//                 firstTransaction: 1,
-//                 lastTransaction: 1
-//             }
-//         },
-//         {
-//             $sort: { totalSpent: -1 }
-//         }
-//     ]);
-// };
-
-// // Merchant spending patterns and subscription detection
-// const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
-//     const startDate = new Date();
-//     startDate.setDate(startDate.getDate() - days);
-
-//     return await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 date: { $gte: startDate },
-//                 amount: { $gt: 0 },
-//                 merchant: { $exists: true, $ne: null }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: "$merchant",
-//                 totalSpent: { $sum: "$amount" },
-//                 transactionCount: { $sum: 1 },
-//                 avgAmount: { $avg: "$amount" },
-//                 amounts: { $push: "$amount" },
-//                 dates: { $push: "$date" },
-//                 categories: { $addToSet: "$category" }
-//             }
-//         },
-//         {
-//             $addFields: {
-//                 isRecurring: {
-//                     $cond: {
-//                         if: { $gte: ["$transactionCount", 3] },
-//                         then: true,
-//                         else: false
-//                     }
-//                 },
-//                 daysBetweenTransactions: {
-//                     $map: {
-//                         input: { $range: [1, { $size: "$dates" }] },
-//                         as: "idx",
-//                         in: {
-//                             $divide: [
-//                                 {
-//                                     $subtract: [
-//                                         { $arrayElemAt: ["$dates", "$$idx"] },
-//                                         { $arrayElemAt: ["$dates", { $subtract: ["$$idx", 1] }] }
-//                                     ]
-//                                 },
-//                                 1000 * 60 * 60 * 24
-//                             ]
-//                         }
-//                     }
-//                 }
-//             }
-//         },
-//         {
-//             $project: {
-//                 _id: 0,
-//                 merchant: "$_id",
-//                 totalSpent: { $round: ["$totalSpent", 2] },
-//                 transactionCount: 1,
-//                 avgAmount: { $round: ["$avgAmount", 2] },
-//                 isRecurring: 1,
-//                 avgDaysBetween: { $round: [{ $avg: "$daysBetweenTransactions" }, 1] },
-//                 categories: 1,
-//                 lastTransaction: { $max: "$dates" }
-//             }
-//         },
-//         {
-//             $sort: { totalSpent: -1 }
-//         }
-//     ]);
-// };
-
-// // Spending behavior patterns
-// const getSpendingPatterns = async (Transaction, userId, days = 30) => {
-//     const startDate = new Date();
-//     startDate.setDate(startDate.getDate() - days);
-
-//     return await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 date: { $gte: startDate },
-//                 amount: { $gt: 0 }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: {
-//                     dayOfWeek: { $dayOfWeek: "$date" },
-//                     hour: { $hour: "$date" }
-//                 },
-//                 totalSpent: { $sum: "$amount" },
-//                 transactionCount: { $sum: 1 },
-//                 avgAmount: { $avg: "$amount" }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: "$_id.dayOfWeek",
-//                 dailyTotal: { $sum: "$totalSpent" },
-//                 dailyCount: { $sum: "$transactionCount" },
-//                 hourlyBreakdown: {
-//                     $push: {
-//                         hour: "$_id.hour",
-//                         amount: { $round: ["$totalSpent", 2] },
-//                         count: "$transactionCount"
-//                     }
-//                 }
-//             }
-//         },
-//         {
-//             $project: {
-//                 _id: 0,
-//                 dayOfWeek: "$_id",
-//                 dayName: {
-//                     $switch: {
-//                         branches: [
-//                             { case: { $eq: ["$_id", 1] }, then: "Sunday" },
-//                             { case: { $eq: ["$_id", 2] }, then: "Monday" },
-//                             { case: { $eq: ["$_id", 3] }, then: "Tuesday" },
-//                             { case: { $eq: ["$_id", 4] }, then: "Wednesday" },
-//                             { case: { $eq: ["$_id", 5] }, then: "Thursday" },
-//                             { case: { $eq: ["$_id", 6] }, then: "Friday" },
-//                             { case: { $eq: ["$_id", 7] }, then: "Saturday" }
-//                         ],
-//                         default: "Unknown"
-//                     }
-//                 },
-//                 totalSpent: { $round: ["$dailyTotal", 2] },
-//                 transactionCount: "$dailyCount",
-//                 peakHour: {
-//                     $arrayElemAt: [
-//                         "$hourlyBreakdown.hour",
-//                         {
-//                             $indexOfArray: [
-//                                 "$hourlyBreakdown.amount",
-//                                 { $max: "$hourlyBreakdown.amount" }
-//                             ]
-//                         }
-//                     ]
-//                 }
-//             }
-//         },
-//         {
-//             $sort: { dayOfWeek: 1 }
-//         }
-//     ]);
-// };
-
-// // Large transactions and anomalies
-// const getLargeTransactions = async (Transaction, userId, days = 30) => {
-//     const startDate = new Date();
-//     startDate.setDate(startDate.getDate() - days);
-
-//     // First get the user's average transaction amount
-//     const avgResult = await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 amount: { $gt: 0 }
-//             }
-//         },
-//         {
-//             $group: {
-//                 _id: null,
-//                 avgAmount: { $avg: "$amount" }
-//             }
-//         }
-//     ]);
-
-//     const avgAmount = avgResult.length > 0 ? avgResult[0].avgAmount : 1000;
-//     const threshold = avgAmount * 3; // 3x average as "large"
-
-//     return await Transaction.aggregate([
-//         {
-//             $match: {
-//                 user: new mongoose.Types.ObjectId(userId),
-//                 date: { $gte: startDate },
-//                 amount: { $gte: threshold }
-//             }
-//         },
-//         {
-//             $project: {
-//                 _id: 0,
-//                 amount: { $round: ["$amount", 2] },
-//                 merchant: 1,
-//                 category: 1,
-//                 date: 1,
-//                 timesLargerThanAvg: { $round: [{ $divide: ["$amount", avgAmount] }, 1] }
-//             }
-//         },
-//         {
-//             $sort: { amount: -1 }
-//         }
-//     ]);
-// };
-
-// // Generate all insights data
-// const generateInsightData = async (Transaction, userId) => {
-//     const [
-//         monthlyData,
-//         categoryData,
-//         merchantData,
-//         patternsData,
-//         largeTransactions
-//     ] = await Promise.all([
-//         getMonthlySpendingSummary(Transaction, userId),
-//         getCategoryAnalysis(Transaction, userId),
-//         getMerchantAnalysis(Transaction, userId),
-//         getSpendingPatterns(Transaction, userId),
-//         getLargeTransactions(Transaction, userId)
-//     ]);
-
-//     return {
-//         monthlyData,
-//         categoryData,
-//         merchantData,
-//         patternsData,
-//         largeTransactions,
-//         currency: 'INR'
-//     };
-// };
-
-// // ================================
-// // 2. LLM INSIGHT GENERATOR FUNCTIONS
-// // ================================
-
-// // Initialize Gemini AI model
-// const initializeGeminiModel = (geminiApiKey) => {
-//     const genAI = new GoogleGenerativeAI(geminiApiKey);
-//     return genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-// };
-
-// // Parse LLM response and handle JSON extraction
-// const parseInsightResponse = (responseText) => {
-//     try {
-//         // Try to extract JSON from the response
-//         const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-//         if (jsonMatch) {
-//             return JSON.parse(jsonMatch[0]);
-//         }
-
-//         // Fallback: create a simple insight object
-//         return [{
-//             type: "general",
-//             title: "Spending Insight",
-//             message: responseText.trim(),
-//             severity: "low"
-//         }];
-//     } catch (error) {
-//         console.error('Error parsing insight response:', error);
-//         return [{
-//             type: "error",
-//             title: "Analysis Error",
-//             message: "Unable to generate insights at this time. Please try again later.",
-//             severity: "low"
-//         }];
-//     }
-// };
-
-// // Generate spending overview insights
-// const generateSpendingOverview = async (model, data) => {
-//     const prompt = `
-// You are a financial analyst for PayWatch, a personal expense tracking app. Generate 3-4 concise, actionable insights about the user's spending overview.
-
-// Monthly Data: ${JSON.stringify(data.monthlyData)}
-// Currency: ${data.currency}
-
-// Focus on:
-// 1. Monthly spending trends (increase/decrease)
-// 2. Transaction frequency patterns
-// 3. Average transaction size changes
-// 4. Overall financial health indicators
-
-// Guidelines:
-// - Use conversational, friendly tone
-// - Include specific numbers and percentages
-// - Make insights actionable
-// - Keep each insight to 1-2 sentences
-// - Format as JSON array of insight objects
-
-// Example format:
-// [
-//   {
-//     "type": "trend",
-//     "title": "Monthly Spending Trend",
-//     "message": "Your spending increased by 15% this month compared to last month (₹45,000 vs ₹39,000).",
-//     "severity": "medium"
-//   }
-// ]
-// `;
-
-//     const result = await model.generateContent(prompt);
-//     return parseInsightResponse(result.response.text());
-// };
-
-// // Generate category insights
-// const generateCategoryInsights = async (model, data) => {
-//     const prompt = `
-// You are a financial analyst for PayWatch. Generate 3-4 insights about the user's spending categories.
-
-// Category Data: ${JSON.stringify(data.categoryData)}
-// Currency: ${data.currency}
-
-// Focus on:
-// 1. Top spending categories and their percentage of total
-// 2. Category-wise spending patterns
-// 3. Unusual category activity
-// 4. Opportunities for optimization
-
-// Guidelines:
-// - Use conversational, friendly tone
-// - Include specific numbers and percentages
-// - Make insights actionable
-// - Keep each insight to 1-2 sentences
-// - Format as JSON array of insight objects
-
-// Severity levels: "low", "medium", "high"
-// `;
-
-//     const result = await model.generateContent(prompt);
-//     return parseInsightResponse(result.response.text());
-// };
-
-// // Generate merchant and subscription insights
-// const generateMerchantInsights = async (model, data) => {
-//     const prompt = `
-// You are a financial analyst for PayWatch. Generate 3-4 insights about merchants and subscriptions.
-
-// Merchant Data: ${JSON.stringify(data.merchantData)}
-// Currency: ${data.currency}
-
-// Focus on:
-// 1. Recurring payments and potential subscriptions
-// 2. Most frequent merchants
-// 3. Merchant spending patterns
-// 4. Subscription optimization opportunities
-
-// Guidelines:
-// - Use conversational, friendly tone
-// - Include specific numbers
-// - Highlight subscription savings opportunities
-// - Keep each insight to 1-2 sentences
-// - Format as JSON array of insight objects
-// `;
-
-//     const result = await model.generateContent(prompt);
-//     return parseInsightResponse(result.response.text());
-// };
-
-// // Generate behavioral pattern insights
-// const generateBehaviorInsights = async (model, data) => {
-//     const prompt = `
-// You are a financial analyst for PayWatch. Generate 2-3 insights about spending behavior patterns.
-
-// Spending Patterns: ${JSON.stringify(data.patternsData)}
-// Large Transactions: ${JSON.stringify(data.largeTransactions)}
-// Currency: ${data.currency}
-
-// Focus on:
-// 1. Day-of-week spending patterns
-// 2. Time-based spending habits
-// 3. Large transaction alerts
-// 4. Behavioral spending insights
-
-// Guidelines:
-// - Use conversational, friendly tone
-// - Include specific days/times
-// - Make insights actionable
-// - Keep each insight to 1-2 sentences
-// - Format as JSON array of insight objects
-// `;
-
-//     const result = await model.generateContent(prompt);
-//     return parseInsightResponse(result.response.text());
-// };
-
-// // Generate all insights
-// const generateAllInsights = async (Transaction, userId, geminiApiKey) => {
-//     try {
-//         const model = initializeGeminiModel(geminiApiKey);
-//         const data = await generateInsightData(Transaction, userId);
-
-//         const [
-//             spendingOverview,
-//             categoryInsights,
-//             merchantInsights,
-//             behaviorInsights
-//         ] = await Promise.all([
-//             generateSpendingOverview(model, data),
-//             generateCategoryInsights(model, data),
-//             generateMerchantInsights(model, data),
-//             generateBehaviorInsights(model, data)
-//         ]);
-
-//         return {
-//             success: true,
-//             insights: {
-//                 spendingOverview,
-//                 categoryInsights,
-//                 merchantInsights,
-//                 behaviorInsights
-//             },
-//             metadata: {
-//                 generatedAt: new Date().toISOString(),
-//                 userId: userId,
-//                 dataRange: '30-60 days'
-//             }
-//         };
-//     } catch (error) {
-//         console.error('Error generating insights:', error);
-//         return {
-//             success: false,
-//             error: error.message,
-//             insights: null
-//         };
-//     }
-// };
-
-// // ================================
-// // 3. MAIN SERVICE FUNCTIONS
-// // ================================
-
-// // Main function to generate user insights
-// const generateUserInsights = async (Transaction, userId, geminiApiKey) => {
-//     return await generateAllInsights(Transaction, userId, geminiApiKey);
-// };
-
-// // Get raw aggregated data for dashboard
-// const getUserAggregatedData = async (Transaction, userId) => {
-//     return await generateInsightData(Transaction, userId);
-// };
-
-// // ================================
-// // 4. USAGE EXAMPLE
-// // ================================
-
-// // Example usage in your Express route
-// const handleGenerateInsights = async (req, res) => {
-//     try {
-//         const { userId } = req.user; // Assuming user is authenticated
-//         const Transaction = req.app.get('Transaction'); // Your transaction model
-//         const geminiApiKey = process.env.GEMINI_API_KEY;
-
-//         const insights = await generateUserInsights(Transaction, userId, geminiApiKey);
-
-//         if (insights.success) {
-//             res.json({
-//                 success: true,
-//                 data: insights
-//             });
-//         } else {
-//             res.status(500).json({
-//                 success: false,
-//                 error: insights.error
-//             });
-//         }
-//     } catch (error) {
-//         console.error('Insight generation error:', error);
-//         res.status(500).json({
-//             success: false,
-//             error: 'Failed to generate insights'
-//         });
-//     }
-// };
-
-// // ================================
-// // 5. EXPORTS
-// // ================================
-
-// export {
-//     // Aggregation functions
-//     getMonthlySpendingSummary,
-//     getCategoryAnalysis,
-//     getMerchantAnalysis,
-//     getSpendingPatterns,
-//     getLargeTransactions,
-//     generateInsightData,
-
-//     // LLM functions
-//     initializeGeminiModel,
-//     parseInsightResponse,
-//     generateSpendingOverview,
-//     generateCategoryInsights,
-//     generateMerchantInsights,
-//     generateBehaviorInsights,
-//     generateAllInsights,
-
-//     // Main service functions
-//     generateUserInsights,
-//     getUserAggregatedData,
-
-//     // Route handler
-//     handleGenerateInsights
-// };
-
-// export default handleGenerateInsights;
-
-
-// // const generateSpendingOverview = async (model, data) => {
-// //     const prompt = `
-// // You are a financial analyst at PayWatch, a personal expense tracking app. Write a friendly and concise financial summary in paragraph form (like an email) for the user based on their recent spending data.
-
-// // Monthly Data: ${JSON.stringify(data.monthlyData)}
-// // Currency: ${data.currency}
-
-// // Focus on:
-// // - Monthly spending trends (increase/decrease)
-// // - Transaction frequency patterns
-// // - Average transaction size changes
-// // - Overall financial health indicators
-
-// // Guidelines:
-// // - Tone: warm, conversational, email-style
-// // - Structure: 1-2 paragraphs
-// // - Include specific values and percentages
-// // - Avoid using bullet points or JSON
-// // `;
-
-// //     const result = await model.generateContent(prompt);
-// //     return [{ type: "paragraph", title: "Spending Overview", message: result.response.text().trim(), severity: "medium" }];
-// // };
-
 
 import mongoose from 'mongoose';
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -678,7 +55,17 @@ const getCategoryAnalysis = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    return await Transaction.aggregate([
+    console.log('🔍 Category Analysis Debug:', {
+        userId,
+        startDate,
+        days
+    });
+
+    const allTransactions = await Transaction.find({ user: userId }).lean();
+    console.log('📊 Total user transactions:', allTransactions.length);
+    console.log('📊 Sample transaction:', allTransactions[0]);
+
+    const result = await Transaction.aggregate([
         {
             $match: {
                 user: new mongoose.Types.ObjectId(userId),
@@ -722,6 +109,10 @@ const getCategoryAnalysis = async (Transaction, userId, days = 30) => {
             $sort: { totalSpent: -1 }
         }
     ]);
+
+    console.log('📊 Category analysis result count:', result.length);
+    
+    return result;
 };
 
 // Enhanced merchant analysis for subscription and habit tracking
@@ -729,7 +120,13 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    return await Transaction.aggregate([
+    console.log('🔍 Merchant Analysis Debug:', {
+        userId,
+        startDate,
+        days
+    });
+
+    const result = await Transaction.aggregate([
         {
             $match: {
                 user: new mongoose.Types.ObjectId(userId),
@@ -814,6 +211,10 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
             $sort: { totalSpent: -1 }
         }
     ]);
+
+    console.log('📊 Merchant analysis result count:', result.length);
+    
+    return result;
 };
 
 // Enhanced spending patterns with lifestyle insights
@@ -821,7 +222,13 @@ const getSpendingPatterns = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    return await Transaction.aggregate([
+    console.log('🔍 Spending Patterns Debug:', {
+        userId,
+        startDate,
+        days
+    });
+
+    const result = await Transaction.aggregate([
         {
             $match: {
                 user: new mongoose.Types.ObjectId(userId),
@@ -896,6 +303,10 @@ const getSpendingPatterns = async (Transaction, userId, days = 30) => {
             $sort: { dayOfWeek: 1 }
         }
     ]);
+
+    console.log('📊 Spending patterns result count:', result.length);
+    
+    return result;
 };
 
 // Budget performance analysis
@@ -938,6 +349,8 @@ const getBudgetPerformance = async (Transaction, userId, days = 30) => {
 
 // Enhanced insights data generation
 const generateInsightData = async (Transaction, userId) => {
+    console.log('🔍 Generating insight data for user:', userId);
+    
     const [
         monthlyData,
         categoryData,
@@ -945,12 +358,20 @@ const generateInsightData = async (Transaction, userId) => {
         patternsData,
         budgetData
     ] = await Promise.all([
-        getMonthlySpendingSummary(Transaction, userId),
-        getCategoryAnalysis(Transaction, userId),
-        getMerchantAnalysis(Transaction, userId),
-        getSpendingPatterns(Transaction, userId),
-        getBudgetPerformance(Transaction, userId)
+        getMonthlySpendingSummary(Transaction, userId, 12),
+        getCategoryAnalysis(Transaction, userId, 365),
+        getMerchantAnalysis(Transaction, userId, 365),
+        getSpendingPatterns(Transaction, userId, 365),
+        getBudgetPerformance(Transaction, userId, 365)
     ]);
+
+    console.log('📊 Insight Data Summary:', {
+        monthlyDataCount: monthlyData.length,
+        categoryDataCount: categoryData.length,
+        merchantDataCount: merchantData.length,
+        patternsDataCount: patternsData.length,
+        budgetDataCount: budgetData.length
+    });
 
     return {
         monthlyData,

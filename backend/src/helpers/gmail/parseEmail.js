@@ -16,11 +16,12 @@ function cleanLLMResponse(text) {
 }
 
 /**
- * Parses an email and returns the extracted transaction object.
+ * Parses an email and extracts transaction details ONLY if it's a payment-related email.
+ * Does NOT store raw email text for privacy.
  * @param {string} rawEmailText - Raw email content
  * @param {string} userId - MongoDB ObjectId for the user
  * @param {string} [gmailMessageId] - Optional Gmail message ID
- * @returns {Promise<object|null>} - Parsed transaction data or null
+ * @returns {Promise<object|null>} - Parsed transaction data or null if not a payment email
  */
 export async function parseEmailContent(rawEmailText, userId, gmailMessageId = null) {
   try {
@@ -35,11 +36,11 @@ export async function parseEmailContent(rawEmailText, userId, gmailMessageId = n
     const parsed = JSON.parse(cleaned);
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      console.warn("❗ LLM returned empty or invalid array.");
+      console.warn("❗ Email does not contain valid payment transactions.");
       return null;
     }
 
-    const tx = parsed[0]; // Assume 1 email → 1 transaction
+    const tx = parsed[0]; 
 
     const transactionData = {
       amount: tx.amount,
@@ -47,13 +48,12 @@ export async function parseEmailContent(rawEmailText, userId, gmailMessageId = n
       date: new Date(tx.date),
       category: tx.category,
       merchant: tx.merchant,
-      rawText: rawEmailText,
-      confidence: 1.0,
+      confidence: tx.confidence || 1.0,
     };
 
     return transactionData;
   } catch (err) {
-    console.error("❌ Error parsing transaction:", err.message);
+    console.error("Error parsing transaction:", err.message);
     return null;
   }
 }

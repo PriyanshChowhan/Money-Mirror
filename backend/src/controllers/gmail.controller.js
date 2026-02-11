@@ -1,32 +1,14 @@
-import { getAuthenticatedClient } from '../helpers/gmail/auth.js';
-import { syncUserEmails } from '../helpers/gmail/syncUserEmails.js';
+import { syncEmailsForUser } from '../cron/emailSyncCron.js';
 
 export const syncAndStoreEmails = async (req, res) => {
   try {
     const user = req.user;
     if (!user?.accessToken || !user?.refreshToken) {
-      return res.status(400).json({ error: 'Missing tokens or user' });
+      return res.status(400).json({ error: 'Missing tokens or user. Please re-login with Google.' });
     }
 
-    const authClient = getAuthenticatedClient({
-      access_token: user.accessToken,
-      refresh_token: user.refreshToken,
-    });
-
-    authClient.on('tokens', async (tokens) => {
-      let updated = false;
-      if (tokens.access_token) {
-        user.accessToken = tokens.access_token;
-        updated = true;
-      }
-      if (tokens.refresh_token) {
-        user.refreshToken = tokens.refresh_token;
-        updated = true;
-      }
-      if (updated) await user.save();
-    });
-
-    const saved = await syncUserEmails(authClient, user);
+    console.log(`Manual sync requested by ${user.email}`);
+    const saved = await syncEmailsForUser(user);
 
     res.status(200).json({
       success: true,
@@ -36,6 +18,13 @@ export const syncAndStoreEmails = async (req, res) => {
 
   } catch (err) {
     console.error('Email parse/store error:', err?.message || err);
+    
+    if (err.message?.includes('invalid_grant') || err.code === 401) {
+      return res.status(401).json({ 
+        error: 'Gmail authorization expired. Please log out and log in again.' 
+      });
+    }
+    
     res.status(500).json({ error: 'Failed to parse and store transactions' });
   }
 };

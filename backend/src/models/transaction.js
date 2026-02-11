@@ -34,9 +34,6 @@ const transactionSchema = new mongoose.Schema({
     merchant: {
         type: String
     },
-    rawText: {
-        type: String
-    },
     tags: {
         type: [String]
     },

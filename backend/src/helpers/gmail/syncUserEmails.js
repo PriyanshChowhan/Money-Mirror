@@ -8,7 +8,7 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
   await authClient.getAccessToken();
 
   const emails = await fetchEmails(authClient, user._id, limit);
-  console.log(`📧 Emails fetched: ${emails.length}`);
+  console.log(`Emails fetched: ${emails.length}`);
 
   const savedTransactions = [];
 
@@ -51,7 +51,6 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     console.log("Saved transaction:", saved._id);
   }
 
-  // Only log a sync if something was saved
   if (savedTransactions.length > 0) {
     await SyncLog.create({
       user: user._id,
