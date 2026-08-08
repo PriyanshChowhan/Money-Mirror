@@ -1,5 +1,5 @@
 import { fetchEmails } from './fetchEmail.js';
-import { parseEmailContent } from './parseEmail.js';
+import { parseEmailBatch } from './parseEmail.js';
 import Transaction from '../../models/transaction.js';
 import SyncLog from '../../models/syncLog.js';
 
@@ -10,46 +10,72 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
   const emails = await fetchEmails(authClient, user._id, limit);
   console.log(`Emails fetched: ${emails.length}`);
 
-  const savedTransactions = [];
+  const withText = emails.filter(e => e?.rawText);
+  if (withText.length < emails.length) {
+    console.warn(`Skipped ${emails.length - withText.length} emails with no rawText`);
+  }
 
-  for (const email of emails) {
-    console.log("Processing email:", email.gmailMessageId);
+  // Safety-net dedupe (fetchEmails already skips known gmailMessageIds, this
+  // guards against a race with a concurrent sync for the same user).
+  const ids = withText.map(e => e.gmailMessageId);
+  const existing = ids.length
+    ? await Transaction.find({ gmailMessageId: { $in: ids } }).select('gmailMessageId')
+    : [];
+  const existingIds = new Set(existing.map(t => t.gmailMessageId));
+  const newEmails = withText.filter(e => !existingIds.has(e.gmailMessageId));
 
-    if (!email?.rawText) {
-      console.warn("No rawText found");
-      continue;
-    }
+  if (newEmails.length < withText.length) {
+    console.log(`Skipped ${withText.length - newEmails.length} duplicate emails`);
+  }
 
-    const exists = await Transaction.findOne({ gmailMessageId: email.gmailMessageId });
-    if (exists) {
-      console.log("Skipped duplicate:", email.gmailMessageId);
-      continue;
-    }
+  // ONE (or a few, chunked) Gemini call(s) for ALL new emails in this sync,
+  // instead of a sequential per-email call. This is the dominant latency win.
+  const parsedByGmailId = await parseEmailBatch(newEmails);
 
-    const parsed = await parseEmailContent(email.rawText, user._id, email.gmailMessageId);
+  const toInsert = [];
+  for (const email of newEmails) {
+    const parsed = parsedByGmailId.get(email.gmailMessageId);
 
     if (!parsed) {
-      console.warn("Parsing failed for:", email.gmailMessageId);
+      console.log("No transaction found in email:", email.gmailMessageId);
       continue;
     }
 
     if (!parsed.amount) {
-      console.warn("Parsed transaction missing amount:", parsed);
+      console.warn("Parsed transaction missing amount:", email.gmailMessageId);
       continue;
     }
 
-    const transactionData = {
+    toInsert.push({
       ...parsed,
       user: user._id,
       gmailMessageId: email.gmailMessageId,
       date: parsed.date || new Date(email.internalDate),
       source: 'email',
-    };
-
-    const saved = await Transaction.create(transactionData);
-    savedTransactions.push(saved);
-    console.log("Saved transaction:", saved._id);
+    });
   }
+
+  // Bulk insert instead of one Transaction.create() per email.
+  let savedTransactions = [];
+  if (toInsert.length) {
+    try {
+      savedTransactions = await Transaction.insertMany(toInsert, { ordered: false });
+    } catch (err) {
+      // With ordered:false, valid docs still get inserted even if some hit the
+      // unique gmailMessageId index (e.g. a race with a concurrent sync).
+      if (err.insertedDocs) {
+        savedTransactions = err.insertedDocs;
+        console.warn(
+          `Bulk insert: ${savedTransactions.length} succeeded, ${err.writeErrors?.length || 0} skipped (likely duplicates)`
+        );
+      } else {
+        console.error('Bulk insert failed:', err.message);
+        throw err;
+      }
+    }
+  }
+
+  console.log(`Saved ${savedTransactions.length} transactions for ${user.email}`);
 
   // Always create a sync log to track when we last checked
   // This prevents re-querying the same emails repeatedly
@@ -57,7 +83,7 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     user: user._id,
     fetchedAt: new Date(),
     messageCount: savedTransactions.length,
-    notes: savedTransactions.length > 0 
+    notes: savedTransactions.length > 0
       ? `Synced ${savedTransactions.length} new transactions.`
       : 'Sync completed, no new transactions found.',
   });

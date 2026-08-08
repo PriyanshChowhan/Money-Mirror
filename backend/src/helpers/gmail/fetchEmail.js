@@ -1,6 +1,12 @@
 import { google } from 'googleapis';
+import pLimit from 'p-limit';
 import Transaction from '../../models/transaction.js';
 import SyncLog from '../../models/syncLog.js';
+
+// Cap concurrent gmail.users.messages.get calls per sync so a user with 100
+// new emails doesn't fire 100 simultaneous requests (this is a per-user
+// courtesy limit — Gmail's real quota is enforced server-side by Google).
+const GMAIL_FETCH_CONCURRENCY = 5;
 
 /**
  * Fetch and decode new Gmail messages that look like financial transactions.
@@ -54,38 +60,51 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
   const seenIds = new Set(existing.map(t => t.gmailMessageId));
   console.log(`${existing.length} messages already exist in database`);
   
-  const newEmails = [];
+  const toFetch = messages.filter(msg => !seenIds.has(msg.id));
 
-  for (const msg of messages) {
-    if (seenIds.has(msg.id)) continue;
+  const limit = pLimit(GMAIL_FETCH_CONCURRENCY);
 
-    const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-    const payload = fullMsg.data.payload;
-    if (!payload) {
-      console.warn(`No payload for message ${msg.id}`);
-      continue;
-    }
+  // Concurrency-limited fetch instead of one gmail.users.messages.get() at a
+  // time — same total requests, but they run in parallel (capped) rather
+  // than sequentially, which is the dominant latency cost for a sync with
+  // many new messages.
+  const results = await Promise.all(
+    toFetch.map(msg => limit(async () => {
+      try {
+        const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id });
+        const payload = fullMsg.data.payload;
+        if (!payload) {
+          console.warn(`No payload for message ${msg.id}`);
+          return null;
+        }
 
-    const parts = payload.parts || [];
-    const bodyData =
-      payload.body?.data ||
-      parts.find(p => p.mimeType === 'text/plain')?.body?.data ||
-      parts.find(p => p.mimeType === 'text/html')?.body?.data;
+        const parts = payload.parts || [];
+        const bodyData =
+          payload.body?.data ||
+          parts.find(p => p.mimeType === 'text/plain')?.body?.data ||
+          parts.find(p => p.mimeType === 'text/html')?.body?.data;
 
-    if (!bodyData) {
-      console.warn(`No body data found for message ${msg.id}, snippet: ${fullMsg.data.snippet}`);
-      continue;
-    }
+        if (!bodyData) {
+          console.warn(`No body data found for message ${msg.id}, snippet: ${fullMsg.data.snippet}`);
+          return null;
+        }
 
-    const decoded = Buffer.from(bodyData, 'base64').toString('utf-8');
+        const decoded = Buffer.from(bodyData, 'base64').toString('utf-8');
 
-    newEmails.push({
-      gmailMessageId: msg.id,
-      rawText: decoded,
-      internalDate: new Date(parseInt(fullMsg.data.internalDate)),
-      snippet: fullMsg.data.snippet,
-    });
-  }
+        return {
+          gmailMessageId: msg.id,
+          rawText: decoded,
+          internalDate: new Date(parseInt(fullMsg.data.internalDate)),
+          snippet: fullMsg.data.snippet,
+        };
+      } catch (err) {
+        console.warn(`Failed to fetch message ${msg.id}:`, err.message);
+        return null;
+      }
+    }))
+  );
+
+  const newEmails = results.filter(Boolean);
 
   console.log(`Returning ${newEmails.length} new emails for processing`);
   return newEmails;

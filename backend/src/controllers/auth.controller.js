@@ -3,7 +3,7 @@ import User from '../models/user.js';
 import SyncLog from '../models/syncLog.js';
 import { getAuthURL, getTokensFromCode, getAuthenticatedClient } from '../helpers/gmail/auth.js';
 import { generateToken } from '../utils/generateTokens.js';
-import { syncEmailsForUser } from '../cron/emailSyncCron.js';
+import { enqueueSync } from '../queues/syncQueue.js';
 
 import jwt from 'jsonwebtoken';
 
@@ -64,25 +64,14 @@ export const handleGoogleCallback = async (req, res) => {
       await user.save();
     }
 
-    // Step 2.4: Sync emails on login
-    console.log(`Starting email sync for user: ${user.email}`);
-
-    try {
-      console.log(`Attempting to fetch and sync emails on login...`);
-      const syncedTransactions = await syncEmailsForUser(user);
-      console.log(`Fresh emails synced on login: ${syncedTransactions.length} transactions`);
-    } catch (syncErr) {
-      console.warn(`Email sync failed on login (non-blocking):`, syncErr.message);
-    }
-    console.log(`Login process completed for ${user.email}`);
-
-    // Step 2.5: Generate JWT (your own app token)
+    // Step 2.4: Generate JWT and send the user to the dashboard IMMEDIATELY.
+    // Sync no longer blocks login — it's queued as a background job below,
+    // after the response is already on its way to the browser.
     const token = generateToken(user._id, user.name);
 
     const isProduction = process.env.NODE_ENV === 'production';
     const frontendRedirectBase = process.env.FRONTEND_URL || (isProduction ? 'https://money-mirror.xyz' : 'http://localhost:5173');
 
-    // Step 2.6: Send JWT as cookie 
     res.cookie('jwt', token, {
       httpOnly: true,
       secure: isProduction,
@@ -92,10 +81,30 @@ export const handleGoogleCallback = async (req, res) => {
 
     res.redirect(`${frontendRedirectBase}/dashboard`);
 
+    // Step 2.5: Queue the Gmail sync AFTER the response is sent. The
+    // frontend shows existing/cached data immediately and can poll
+    // GET /api/gmail/sync/status to know when fresh data has landed.
+    // enqueueSync uses a deterministic jobId, so this is a no-op if a sync
+    // for this user is already queued/running (handles double-callback, etc).
+    try {
+      const job = await enqueueSync(user._id.toString());
+      console.log(job
+        ? `Queued sync job ${job.id} for ${user.email}`
+        : `Sync already queued/running for ${user.email}, skipped duplicate enqueue`);
+    } catch (queueErr) {
+      // Never let a queueing failure affect the login itself — the response
+      // has already been sent at this point anyway.
+      console.error(`Failed to queue sync for ${user.email}:`, queueErr.message);
+    }
 
   } catch (error) {
     console.error('Google Auth Error:', error);
-    res.status(500).json({ message: 'Google login failed' });
+    // Guard against "Cannot set headers after they are sent" — res.redirect()
+    // above may have already completed the response by the time an error
+    // surfaces from the (non-blocking) enqueueSync step.
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Google login failed' });
+    }
   }
 };
 
