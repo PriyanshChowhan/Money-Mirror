@@ -1,12 +1,6 @@
-
 import mongoose from 'mongoose';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// ================================
-// 1. MONGODB AGGREGATION FUNCTIONS
-// ================================
-
-// Monthly spending summary with trends
 const getMonthlySpendingSummary = async (Transaction, userId, months = 12) => {
     const startDate = new Date();
     startDate.setMonth(startDate.getMonth() - months);
@@ -110,7 +104,7 @@ const getCategoryAnalysis = async (Transaction, userId, days = 30) => {
         }
     ]);
 
-    console.log('📊 Category analysis result count:', result.length);
+    console.log('Category analysis result count:', result.length);
     
     return result;
 };
@@ -215,6 +209,233 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
     console.log('📊 Merchant analysis result count:', result.length);
     
     return result;
+};
+
+// ================================
+// 1b. RECURRING SUBSCRIPTION DETECTION (deterministic, no AI)
+// ================================
+//
+// Goal: if a merchant charges the same (or near-same) amount on a
+// recognizable cadence - e.g. "₹500 to Netflix roughly every 30 days" -
+// flag it as a subscription automatically, without the user ever typing
+// it into a form. This runs on raw transaction history and produces a
+// confidence score per merchant.
+const detectRecurringSubscriptions = async (Transaction, userId, days = 365) => {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const grouped = await Transaction.aggregate([
+        {
+            $match: {
+                user: new mongoose.Types.ObjectId(userId),
+                date: { $gte: startDate },
+                amount: { $gt: 0 },
+                merchant: { $exists: true, $ne: null, $ne: '' }
+            }
+        },
+        {
+            $group: {
+                _id: "$merchant",
+                amounts: { $push: "$amount" },
+                dates: { $push: "$date" },
+                ids: { $push: "$_id" },
+                categories: { $addToSet: "$category" }
+            }
+        },
+        // need at least 2 charges from the same merchant to even consider it
+        { $match: { "amounts.1": { $exists: true } } }
+    ]);
+
+    const candidates = [];
+
+    for (const group of grouped) {
+        const merchant = group._id;
+        const paired = group.dates
+            .map((d, i) => ({ date: new Date(d), amount: group.amounts[i], id: group.ids[i] }))
+            .sort((a, b) => a.date - b.date);
+
+        const amounts = paired.map(p => p.amount);
+        const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+        const amountVariance = avgAmount > 0
+            ? (Math.max(...amounts) - Math.min(...amounts)) / avgAmount
+            : 1;
+
+        // Gap in days between each consecutive charge from this merchant
+        const intervals = [];
+        for (let i = 1; i < paired.length; i++) {
+            intervals.push((paired[i].date - paired[i - 1].date) / (1000 * 60 * 60 * 24));
+        }
+        const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+        const intervalSpread = intervals.length ? Math.max(...intervals) - Math.min(...intervals) : 999;
+
+        // Classify the cadence - if it doesn't fit a recognizable pattern
+        // (weekly / monthly / yearly) it's probably not a subscription
+        let billingCycle = 'unknown';
+        if (avgInterval >= 25 && avgInterval <= 35) billingCycle = 'monthly';
+        else if (avgInterval >= 5 && avgInterval <= 9) billingCycle = 'weekly';
+        else if (avgInterval >= 350 && avgInterval <= 380) billingCycle = 'yearly';
+        if (billingCycle === 'unknown') continue;
+
+        // "Same fixed date every month" check
+        const daysOfMonth = paired.map(p => p.date.getDate());
+        const avgDayOfMonth = daysOfMonth.reduce((a, b) => a + b, 0) / daysOfMonth.length;
+        const dayOfMonthSpread = Math.max(...daysOfMonth) - Math.min(...daysOfMonth);
+
+        // Confidence blends: how much history we have, how consistent the
+        // amount is, how consistent the interval is, and (for monthly
+        // cadences) how consistent the billing day is.
+        let confidence = 0;
+        confidence += Math.min(paired.length / 4, 1) * 0.35;
+        confidence += amountVariance <= 0.02 ? 0.30 : amountVariance <= 0.08 ? 0.15 : 0;
+        confidence += intervalSpread <= 3 ? 0.20 : intervalSpread <= 7 ? 0.10 : 0;
+        confidence += (billingCycle !== 'monthly' || dayOfMonthSpread <= 3)
+            ? 0.15
+            : dayOfMonthSpread <= 6 ? 0.07 : 0;
+        confidence = Math.round(Math.min(confidence, 1) * 100) / 100;
+
+        if (confidence < 0.4) continue; // too weak a signal yet - wait for more data
+
+        const lastCharge = paired[paired.length - 1];
+        const predictedNextBillingDate = new Date(lastCharge.date);
+        predictedNextBillingDate.setDate(predictedNextBillingDate.getDate() + Math.round(avgInterval));
+
+        candidates.push({
+            merchant,
+            avgAmount: Math.round(avgAmount * 100) / 100,
+            amountVariance: Math.round(amountVariance * 1000) / 1000,
+            occurrenceCount: paired.length,
+            avgDaysBetween: Math.round(avgInterval * 10) / 10,
+            billingCycle,
+            dayOfMonth: billingCycle === 'monthly' ? Math.round(avgDayOfMonth) : null,
+            lastPaymentDate: lastCharge.date,
+            predictedNextBillingDate,
+            confidence,
+            category: group.categories.find(Boolean) || null,
+            linkedTransactionIds: paired.map(p => p.id)
+        });
+    }
+
+    return candidates.sort((a, b) => b.confidence - a.confidence);
+};
+
+// Upserts detected recurring charges into the Subscription collection so
+// they appear automatically - no manual entry required. Manually-created
+// subscriptions and anything the user dismissed are left untouched.
+const syncDetectedSubscriptions = async (Transaction, Subscription, userId) => {
+    const candidates = await detectRecurringSubscriptions(Transaction, userId);
+    const result = { created: 0, updated: 0, skipped: 0, candidatesFound: candidates.length };
+
+    for (const c of candidates) {
+        const existing = await Subscription.findOne({ user: userId, merchant: c.merchant });
+
+        if (existing && existing.userDismissed) {
+            result.skipped += 1;
+            continue;
+        }
+
+        if (existing && existing.source === 'manual') {
+            existing.lastPaymentDate = c.lastPaymentDate;
+            existing.nextBillingDate = c.predictedNextBillingDate;
+            await existing.save();
+            result.updated += 1;
+            continue;
+        }
+
+        const payload = {
+            user: userId,
+            service: c.merchant,
+            merchant: c.merchant,
+            amount: c.avgAmount,
+            billingCycle: c.billingCycle,
+            nextBillingDate: c.predictedNextBillingDate,
+            lastPaymentDate: c.lastPaymentDate,
+            category: c.category,
+            source: 'detected',
+            status: 'active',
+            confidence: c.confidence,
+            occurrenceCount: c.occurrenceCount,
+            avgDaysBetween: c.avgDaysBetween,
+            dayOfMonth: c.dayOfMonth,
+            amountVariance: c.amountVariance,
+            linkedTransactionIds: c.linkedTransactionIds
+        };
+
+        if (existing) {
+            Object.assign(existing, payload);
+            await existing.save();
+            result.updated += 1;
+        } else {
+            await Subscription.create(payload);
+            result.created += 1;
+        }
+    }
+
+    return result;
+};
+
+// Raw (non-AI) subscription insight for the /raw/subscriptions endpoint:
+// runs detection, syncs it into the DB, then returns a dashboard-ready
+// payload - active subscriptions, upcoming renewals, newly detected items
+// still awaiting user confirmation, and a monthly/yearly cost rollup.
+const getSubscriptionRawInsights = async (Transaction, Subscription, userId) => {
+    await syncDetectedSubscriptions(Transaction, Subscription, userId);
+
+    const subscriptions = await Subscription.find({
+        user: userId,
+        status: { $ne: 'cancelled' },
+        userDismissed: { $ne: true }
+    }).sort({ nextBillingDate: 1 }).lean();
+
+    const now = new Date();
+    const in7Days = new Date(now);
+    in7Days.setDate(in7Days.getDate() + 7);
+
+    const upcomingRenewals = subscriptions.filter(s =>
+        s.nextBillingDate && new Date(s.nextBillingDate) >= now && new Date(s.nextBillingDate) <= in7Days
+    );
+
+    const awaitingConfirmation = subscriptions.filter(s => s.source === 'detected' && !s.userConfirmed);
+
+    const monthlyEquivalent = (s) => {
+        if (!s.amount) return 0;
+        if (s.billingCycle === 'weekly') return s.amount * 4.33;
+        if (s.billingCycle === 'yearly') return s.amount / 12;
+        return s.amount;
+    };
+
+    const totalMonthlySpend = Math.round(
+        subscriptions.reduce((sum, s) => sum + monthlyEquivalent(s), 0) * 100
+    ) / 100;
+
+    return {
+        subscriptions,
+        upcomingRenewals,
+        awaitingConfirmation,
+        summary: {
+            activeCount: subscriptions.length,
+            totalMonthlySpend,
+            totalYearlySpend: Math.round(totalMonthlySpend * 12 * 100) / 100,
+            currency: 'INR'
+        }
+    };
+};
+
+// Lets the user confirm a detected subscription ("yes, this is really a
+// subscription") or dismiss it ("no, stop flagging this merchant").
+const confirmSubscription = async (Subscription, userId, subscriptionId) => {
+    return Subscription.findOneAndUpdate(
+        { _id: subscriptionId, user: userId },
+        { userConfirmed: true },
+        { new: true }
+    );
+};
+
+const dismissSubscription = async (Subscription, userId, subscriptionId) => {
+    return Subscription.findOneAndUpdate(
+        { _id: subscriptionId, user: userId },
+        { userDismissed: true, status: 'cancelled' },
+        { new: true }
+    );
 };
 
 // Enhanced spending patterns with lifestyle insights
@@ -381,6 +602,177 @@ const generateInsightData = async (Transaction, userId) => {
         budgetData,
         currency: 'INR'
     };
+};
+
+// ================================
+// 1c. BUDGET OPTIMIZER (deterministic, no AI)
+// ================================
+//
+// Answers: "for my income and household size, how much SHOULD I be
+// spending per category, and how does that compare to what I actually
+// spend?" Groceries scale with headcount (a family of 4 needs more food
+// than a single person on the same income); everything else scales with
+// income as a %. All benchmarks are overridable per-user via
+// BudgetPreference.customAllocations.
+const BUDGET_BENCHMARKS = {
+    metro: { groceryPerAdult: 6000, groceryPerChild: 3500, rentPct: 30 },
+    tier2: { groceryPerAdult: 4500, groceryPerChild: 2800, rentPct: 25 },
+    tier3: { groceryPerAdult: 3500, groceryPerChild: 2200, rentPct: 20 }
+};
+
+// % of monthly income for categories that scale with earnings rather than
+// household size
+const INCOME_PCT_BENCHMARKS = {
+    utilities: 5,
+    transportation: 8,
+    healthcare: 5,
+    education: 8, // only applied when the household has children
+    entertainment: 5,
+    subscriptions: 3,
+    savings: 20
+};
+
+// Free-text keywords used to match a user's real transaction categories to
+// our benchmark buckets, so "actual" spend can be compared to "recommended"
+const CATEGORY_KEYWORD_MAP = {
+    groceries: ['grocery', 'groceries', 'supermarket'],
+    rent: ['rent', 'housing', 'mortgage'],
+    utilities: ['utility', 'utilities', 'electricity', 'water bill', 'gas bill', 'broadband', 'internet'],
+    transportation: ['transport', 'fuel', 'petrol', 'diesel', 'cab', 'uber', 'ola', 'metro', 'commute'],
+    healthcare: ['health', 'medical', 'pharmacy', 'doctor', 'hospital'],
+    education: ['education', 'school', 'tuition', 'childcare', 'daycare'],
+    entertainment: ['entertainment', 'dining', 'restaurant', 'movies', 'ott', 'leisure'],
+    subscriptions: ['subscription', 'subscriptions'],
+    savings: ['savings', 'investment', 'sip', 'mutual fund']
+};
+
+const matchActualSpend = (categoryData, keywords) => {
+    if (!keywords || !keywords.length) return 0;
+    return categoryData
+        .filter(c => keywords.some(k => (c.category || '').toLowerCase().includes(k)))
+        .reduce((sum, c) => sum + (c.totalSpent || 0), 0);
+};
+
+// Core optimizer: given income + household composition (+ optional real
+// category spend), produce a recommended monthly budget per category and
+// flag whether the user is over/under/on-track against it.
+const getBudgetOptimizerRecommendation = ({
+    monthlyIncome,
+    adults = 2,
+    children = 0,
+    cityTier = 'metro',
+    customAllocations = {},
+    categoryData = []
+}) => {
+    if (!monthlyIncome || monthlyIncome <= 0) {
+        throw new Error('monthlyIncome must be a positive number');
+    }
+
+    const benchmark = BUDGET_BENCHMARKS[cityTier] || BUDGET_BENCHMARKS.metro;
+
+    // Groceries scale with headcount, capped at 30% of income so it stays
+    // sane for lower incomes with larger families
+    const groceryRaw = adults * benchmark.groceryPerAdult + children * benchmark.groceryPerChild;
+    const groceryRecommended = Math.min(groceryRaw, monthlyIncome * 0.30);
+
+    const pctAmount = (key, fallbackPct) => {
+        const p = customAllocations[key] !== undefined ? customAllocations[key] : fallbackPct;
+        return Math.round(monthlyIncome * (p / 100) * 100) / 100;
+    };
+    const pctLabel = (key, fallbackPct) => customAllocations[key] !== undefined ? customAllocations[key] : fallbackPct;
+
+    const recommendations = {
+        groceries: {
+            recommended: Math.round(groceryRecommended),
+            basis: `₹${benchmark.groceryPerAdult}/adult + ₹${benchmark.groceryPerChild}/child (${cityTier} benchmark)`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.groceries)
+        },
+        rent: {
+            recommended: pctAmount('rent', benchmark.rentPct),
+            basis: `${pctLabel('rent', benchmark.rentPct)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.rent)
+        },
+        utilities: {
+            recommended: pctAmount('utilities', INCOME_PCT_BENCHMARKS.utilities),
+            basis: `${pctLabel('utilities', INCOME_PCT_BENCHMARKS.utilities)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.utilities)
+        },
+        transportation: {
+            recommended: pctAmount('transportation', INCOME_PCT_BENCHMARKS.transportation),
+            basis: `${pctLabel('transportation', INCOME_PCT_BENCHMARKS.transportation)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.transportation)
+        },
+        healthcare: {
+            recommended: pctAmount('healthcare', INCOME_PCT_BENCHMARKS.healthcare),
+            basis: `${pctLabel('healthcare', INCOME_PCT_BENCHMARKS.healthcare)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.healthcare)
+        },
+        education: {
+            recommended: children > 0 ? pctAmount('education', INCOME_PCT_BENCHMARKS.education) : 0,
+            basis: children > 0 ? `${pctLabel('education', INCOME_PCT_BENCHMARKS.education)}% of income` : 'no children in household',
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.education)
+        },
+        entertainment: {
+            recommended: pctAmount('entertainment', INCOME_PCT_BENCHMARKS.entertainment),
+            basis: `${pctLabel('entertainment', INCOME_PCT_BENCHMARKS.entertainment)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.entertainment)
+        },
+        subscriptions: {
+            recommended: pctAmount('subscriptions', INCOME_PCT_BENCHMARKS.subscriptions),
+            basis: `${pctLabel('subscriptions', INCOME_PCT_BENCHMARKS.subscriptions)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.subscriptions)
+        },
+        savings: {
+            recommended: pctAmount('savings', INCOME_PCT_BENCHMARKS.savings),
+            basis: `${pctLabel('savings', INCOME_PCT_BENCHMARKS.savings)}% of income`,
+            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.savings)
+        }
+    };
+
+    for (const val of Object.values(recommendations)) {
+        if (!val.recommended) { val.status = 'n/a'; continue; }
+        const diffPct = ((val.actual - val.recommended) / val.recommended) * 100;
+        val.diffPct = Math.round(diffPct);
+        if (diffPct > 15) {
+            val.status = 'over_budget';
+            val.message = `Spending ₹${Math.round(val.actual - val.recommended).toLocaleString('en-IN')} more than the benchmark`;
+        } else if (diffPct < -15) {
+            val.status = 'under_budget';
+            val.message = `₹${Math.round(val.recommended - val.actual).toLocaleString('en-IN')} of headroom left in this category`;
+        } else {
+            val.status = 'on_track';
+            val.message = `Within a healthy range of the ₹${Math.round(val.recommended).toLocaleString('en-IN')} benchmark`;
+        }
+    }
+
+    const totalRecommended = Object.values(recommendations).reduce((s, v) => s + v.recommended, 0);
+    const totalActual = Object.values(recommendations).reduce((s, v) => s + v.actual, 0);
+
+    return {
+        inputs: { monthlyIncome, adults, children, cityTier },
+        recommendations,
+        summary: {
+            totalRecommended: Math.round(totalRecommended),
+            totalActual: Math.round(totalActual),
+            unallocated: Math.round(monthlyIncome - totalRecommended),
+            currency: 'INR'
+        }
+    };
+};
+
+// Convenience wrapper: pulls real category spend for the user, merges it
+// with saved (or ad-hoc) BudgetPreference inputs, and returns the full
+// optimizer result - this is what the /budget-optimizer route calls.
+const getBudgetOptimizerForUser = async (Transaction, userId, { monthlyIncome, adults, children, cityTier, customAllocations }) => {
+    const categoryData = await getCategoryAnalysis(Transaction, userId, 30);
+    return getBudgetOptimizerRecommendation({
+        monthlyIncome,
+        adults,
+        children,
+        cityTier,
+        customAllocations,
+        categoryData
+    });
 };
 
 // ================================
@@ -811,6 +1203,17 @@ export {
     getSpendingPatterns,
     getBudgetPerformance,
     generateInsightData,
+
+    // Recurring subscription detection (deterministic, no AI)
+    detectRecurringSubscriptions,
+    syncDetectedSubscriptions,
+    getSubscriptionRawInsights,
+    confirmSubscription,
+    dismissSubscription,
+
+    // Budget optimizer (deterministic, no AI)
+    getBudgetOptimizerRecommendation,
+    getBudgetOptimizerForUser,
 
     // Enhanced LLM functions
     initializeGeminiModel,
