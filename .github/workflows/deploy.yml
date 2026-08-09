@@ -5,52 +5,39 @@ on:
     branches:
       - main
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: production   
+    environment: production
 
     steps:
-      # ----------------------------
-      # 1. Checkout code
-      # ----------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ----------------------------
-      # 2. Create backend .env file
-      # ----------------------------
-      - name: Create backend env file
-        run: |
-          echo "${{ secrets.ENV_FILE }}" > backend/.env
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # ----------------------------
-      # 3. Login to Docker Hub
-      # ----------------------------
-      - name: Login to Docker Hub
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login \
-            -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # ----------------------------
-      # 4. Build & Push Backend Image
-      # ----------------------------
       - name: Build and push backend image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/app-backend:latest ./backend
-          docker push ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
 
-      # ----------------------------
-      # 5. Build & Push Frontend Image
-      # ----------------------------
       - name: Build and push frontend image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest ./frontend
-          docker push ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
 
-      # ----------------------------
-      # 6. Deploy on EC2 via SSH
-      # ----------------------------
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -58,21 +45,16 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
             cd /home/ubuntu/Money-Mirror
-            # Kill all containers
-            docker kill $(docker ps -q) 2>/dev/null || true
-            docker rm -f $(docker ps -aq) 2>/dev/null || true
-            # Find and kill any process using port 80
-            sudo fuser -k 80/tcp 2>/dev/null || true
-            sudo lsof -ti :80 | xargs kill -9 2>/dev/null || true
-            sleep 5
-            # Aggressive cleanup
-            docker system prune -af --volumes
-            # Fix nginx config directory issue
-            sudo rm -rf nginx/nginx.conf 2>/dev/null || true
-            # Update code and deploy
+
+            test -f backend/.env.production
+            test -f /etc/letsencrypt/live/moneymirror.shop/fullchain.pem
+
             git fetch origin main
             git reset --hard origin/main
-            docker pull ${{ secrets.DOCKER_USERNAME }}/app-backend:latest
-            docker pull ${{ secrets.DOCKER_USERNAME }}/app-frontend:latest
-            docker-compose up -d
+
+            docker compose pull
+            docker compose up -d --remove-orphans
+            docker image prune -f
+            docker compose ps
