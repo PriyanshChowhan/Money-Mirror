@@ -3,6 +3,7 @@ import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dasboard.jsx'
 import FinancialInsights from './pages/Insights.jsx'
 import AIInsightsPage from './pages/AiInsights.jsx'
+import Transactions from './pages/Transactions.jsx'
 import Layout from './components/Layout.jsx'
 import { Routes, Route } from 'react-router-dom';
 import NotFound from './pages/NotFound.jsx'
