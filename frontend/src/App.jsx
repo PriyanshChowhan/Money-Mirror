@@ -18,6 +18,7 @@ function App() {
             <Route path="/ai" element={<AIInsightsPage />} />
             <Route path="/insights" element={<FinancialInsights />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/transactions" element={<Transactions />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFound />} />
