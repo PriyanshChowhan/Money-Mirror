@@ -1,5 +1,5 @@
 import React from "react";
-import loginImage from "../assets/moneymirror-image.png";
+import loginImage from "../assets/moneymirror-image.webp";
 
 function Login() {
   const handleGoogleLogin = () => {
