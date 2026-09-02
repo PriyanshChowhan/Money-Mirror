@@ -204,10 +204,10 @@ function PrivacyPolicy() {
               For privacy questions or data deletion requests, contact:
               <br />
               <a
-                href="mailto:priyanshchowhan@gmail.com"
+                href="mailto:testing15auth@gmail.com"
                 className="text-white underline underline-offset-4"
               >
-                priyanshchowhan@gmail.com
+                testing15auth@gmail.com
               </a>
             </p>
           </section>
