@@ -7,7 +7,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
  */
 export async function parseEmailsWithLLM({ rawEmails, geminiConfig }) {
   const genAI = new GoogleGenerativeAI(geminiConfig.geminiApi);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
 
   const compiledText = rawEmails.join("\n\n");
 
@@ -55,7 +55,7 @@ Return ONLY the JSON array. NO markdown, NO explanations.`;
  */
 export async function parseEmailBatchWithLLM({ emails, geminiConfig }) {
   const genAI = new GoogleGenerativeAI(geminiConfig.geminiApi);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
 
   const compiledText = emails
     .map((e, i) => `--- EMAIL_START index=${i} ---\n${e.rawText}\n--- EMAIL_END index=${i} ---`)

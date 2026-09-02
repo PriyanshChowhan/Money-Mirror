@@ -782,7 +782,7 @@ const getBudgetOptimizerForUser = async (Transaction, userId, { monthlyIncome, a
 // Initialize Gemini AI model
 const initializeGeminiModel = (geminiApiKey) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
-    return genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    return genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
 };
 
 // Enhanced insight parser with action items
