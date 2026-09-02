@@ -1,9 +1,64 @@
 import { google } from 'googleapis';
 import pLimit from 'p-limit';
+import { convert } from 'html-to-text';
 import Transaction from '../../models/transaction.js';
 import SyncLog from '../../models/syncLog.js';
 
 const GMAIL_FETCH_CONCURRENCY = 5;
+
+function decodeBody(data) {
+  if (!data) return '';
+  return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
+}
+
+function htmlToReadableText(html) {
+  if (!html) return '';
+
+  return convert(html, {
+    wordwrap: false,
+    selectors: [
+      { selector: 'img', format: 'skip' },
+      { selector: 'script', format: 'skip' },
+      { selector: 'style', format: 'skip' },
+    ],
+  }).trim();
+}
+
+function collectMimeBodies(part, bodies) {
+  if (!part) return;
+
+  if (part.mimeType === 'text/plain' && part.body?.data) {
+    bodies.plain.push(decodeBody(part.body.data));
+  }
+
+  if (part.mimeType === 'text/html' && part.body?.data) {
+    bodies.html.push(decodeBody(part.body.data));
+  }
+
+  for (const child of part.parts || []) {
+    collectMimeBodies(child, bodies);
+  }
+}
+
+function extractEmailText(payload, snippet = '') {
+  const bodies = { plain: [], html: [] };
+  collectMimeBodies(payload, bodies);
+
+  const plainText = bodies.plain.map(x => x.trim()).filter(Boolean).join('\n\n');
+  const htmlText = bodies.html.map(htmlToReadableText).filter(Boolean).join('\n\n');
+
+  if (htmlText) return htmlText;
+  if (plainText) return plainText;
+
+  if (payload?.body?.data) {
+    const decoded = decodeBody(payload.body.data);
+    return payload.mimeType === 'text/html'
+      ? htmlToReadableText(decoded)
+      : decoded.trim();
+  }
+
+  return snippet?.trim() || '';
+}
 
 export const fetchEmails = async (auth, userId, maxResults = 100) => {
   const gmail = google.gmail({ version: 'v1', auth });
@@ -16,18 +71,18 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
   `.trim();
 
   if (afterDate) {
-    // Gmail API expects date in YYYY/MM/DD format for after: parameter
     const year = afterDate.getFullYear();
     const month = String(afterDate.getMonth() + 1).padStart(2, '0');
     const day = String(afterDate.getDate()).padStart(2, '0');
     const dateStr = `${year}/${month}/${day}`;
+
     gmailQuery += ` after:${dateStr}`;
     console.log(`Fetching emails after: ${dateStr} (${afterDate.toISOString()})`);
   } else {
     console.log('No last sync log found - fetching recent emails');
   }
 
-  console.log("Gmail query:", gmailQuery);
+  console.log('Gmail query:', gmailQuery);
 
   const res = await gmail.users.messages.list({
     userId: 'me',
@@ -38,13 +93,14 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
 
   const messages = res.data.messages || [];
   console.log(`Found ${messages.length} messages from Gmail API`);
-  
-  if (messages.length === 0) {
+
+  if (!messages.length) {
     console.log('No messages matched the query');
     return [];
   }
 
   const messageIds = messages.map(msg => msg.id);
+
   const existing = await Transaction.find({
     user: userId,
     gmailMessageId: { $in: messageIds },
@@ -52,45 +108,50 @@ export const fetchEmails = async (auth, userId, maxResults = 100) => {
 
   const seenIds = new Set(existing.map(t => t.gmailMessageId));
   console.log(`${existing.length} messages already exist in database`);
-  
-  const toFetch = messages.filter(msg => !seenIds.has(msg.id));
 
+  const toFetch = messages.filter(msg => !seenIds.has(msg.id));
   const limit = pLimit(GMAIL_FETCH_CONCURRENCY);
 
   const results = await Promise.all(
-    toFetch.map(msg => limit(async () => {
-      try {
-        const fullMsg = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-        const payload = fullMsg.data.payload;
-        if (!payload) {
-          console.warn(`No payload for message ${msg.id}`);
+    toFetch.map(msg =>
+      limit(async () => {
+        try {
+          const fullMsg = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id,
+            format: 'full',
+          });
+
+          const payload = fullMsg.data.payload;
+
+          if (!payload) {
+            console.warn(`No payload for message ${msg.id}`);
+            return null;
+          }
+
+          const rawText = extractEmailText(payload, fullMsg.data.snippet);
+
+          if (!rawText) {
+            console.warn(`No usable body found for message ${msg.id}`);
+            return null;
+          }
+
+          console.log(
+            `[email] ${msg.id} | mime=${payload.mimeType} | extracted=${rawText.length} chars`
+          );
+
+          return {
+            gmailMessageId: msg.id,
+            rawText,
+            internalDate: new Date(parseInt(fullMsg.data.internalDate, 10)),
+            snippet: fullMsg.data.snippet,
+          };
+        } catch (err) {
+          console.warn(`Failed to fetch message ${msg.id}:`, err.message);
           return null;
         }
-
-        const parts = payload.parts || [];
-        const bodyData =
-          payload.body?.data ||
-          parts.find(p => p.mimeType === 'text/plain')?.body?.data ||
-          parts.find(p => p.mimeType === 'text/html')?.body?.data;
-
-        if (!bodyData) {
-          console.warn(`No body data found for message ${msg.id}, snippet: ${fullMsg.data.snippet}`);
-          return null;
-        }
-
-        const decoded = Buffer.from(bodyData, 'base64').toString('utf-8');
-
-        return {
-          gmailMessageId: msg.id,
-          rawText: decoded,
-          internalDate: new Date(parseInt(fullMsg.data.internalDate)),
-          snippet: fullMsg.data.snippet,
-        };
-      } catch (err) {
-        console.warn(`Failed to fetch message ${msg.id}:`, err.message);
-        return null;
-      }
-    }))
+      })
+    )
   );
 
   const newEmails = results.filter(Boolean);
