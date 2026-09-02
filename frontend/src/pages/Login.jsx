@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import loginImage from "../assets/moneymirror-image.webp";
 
 function Login() {
@@ -63,8 +64,16 @@ function Login() {
       </div>
 
       {/* Footer */}
-      <div className="absolute bottom-6 left-0 right-0 text-center text-xs text-white/50">
-        © {new Date().getFullYear()} MoneyMirror
+      <div className="absolute bottom-6 left-0 right-0 z-20 text-center text-xs text-white/50">
+        <span>© {new Date().getFullYear()} MoneyMirror</span>
+        <span className="mx-2">·</span>
+        <Link to="/privacy" className="hover:text-white transition">
+          Privacy Policy
+        </Link>
+        <span className="mx-2">·</span>
+        <Link to="/terms" className="hover:text-white transition">
+          Terms of Service
+        </Link>
       </div>
     </div>
   );

@@ -1,8 +1,5 @@
 import { parseEmailsWithLLM, parseEmailBatchWithLLM } from "../../langchain/llmParser.js";
 
-// How many emails go into a single Gemini call. Keeps prompt size (and the
-// chance of a truncated/malformed JSON response) under control while still
-// cutting a 30-email sync down to ~3-4 LLM calls instead of 30.
 const BATCH_SIZE = 8;
 
 function chunk(arr, size) {
@@ -99,7 +96,6 @@ export async function parseEmailBatch(emails) {
         continue;
       }
 
-      // Map each result back to its email by index, defensively (LLM output order isn't guaranteed)
       const byIndex = new Map(parsed.map(item => [item.index, item]));
 
       emailChunk.forEach((email, i) => {
@@ -121,9 +117,6 @@ export async function parseEmailBatch(emails) {
       });
     } catch (err) {
       console.error("Error parsing email batch:", err.message);
-      // Don't let one bad chunk kill the whole sync — mark this chunk's emails as
-      // unparsed so the loop moves on; they'll simply be retried on the next sync
-      // since they're only marked "seen" via the SyncLog date cursor, not per-message.
       emailChunk.forEach(e => resultsByGmailId.set(e.gmailMessageId, null));
     }
   }

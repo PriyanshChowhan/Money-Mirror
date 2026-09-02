@@ -1,12 +1,9 @@
 import { Queue } from 'bullmq';
 
-// Shared connection config used by both the Queue (producer, in the API
-// process) and the Worker (consumer, in the separate worker process).
 export const redisConnection = {
   host: process.env.REDIS_HOST || 'localhost',
   port: Number(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
-  // BullMQ requires this to be null, not undefined, for blocking commands.
   maxRetriesPerRequest: null,
 };
 

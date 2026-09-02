@@ -10,8 +10,6 @@ const subscriptionSchema = new mongoose.Schema({
         required: true
     },
     merchant: {
-        // Raw merchant string from Transaction, used as the dedupe key
-        // when auto-syncing detected subscriptions
         type: String,
         index: true
     },

@@ -28,7 +28,6 @@ const budgetPreferenceSchema = new mongoose.Schema({
         min: 0
     },
     city: {
-        // used to pick a cost-of-living tier: metro / tier2 / tier3
         type: String
     },
     cityTier: {
@@ -36,8 +35,6 @@ const budgetPreferenceSchema = new mongoose.Schema({
         enum: ['metro', 'tier2', 'tier3'],
         default: 'metro'
     },
-    // Optional per-category overrides, e.g. { groceries: 25 } meaning 25% of income
-    // If not provided, the optimizer falls back to built-in benchmark percentages
     customAllocations: {
         type: mongoose.Schema.Types.Mixed,
         default: {}

@@ -206,7 +206,7 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
         }
     ]);
 
-    console.log('📊 Merchant analysis result count:', result.length);
+    console.log('Merchant analysis result count:', result.length);
     
     return result;
 };
@@ -525,7 +525,7 @@ const getSpendingPatterns = async (Transaction, userId, days = 30) => {
         }
     ]);
 
-    console.log('📊 Spending patterns result count:', result.length);
+    console.log('Spending patterns result count:', result.length);
     
     return result;
 };
@@ -570,7 +570,7 @@ const getBudgetPerformance = async (Transaction, userId, days = 30) => {
 
 // Enhanced insights data generation
 const generateInsightData = async (Transaction, userId) => {
-    console.log('🔍 Generating insight data for user:', userId);
+    console.log('Generating insight data for user:', userId);
     
     const [
         monthlyData,
@@ -586,7 +586,7 @@ const generateInsightData = async (Transaction, userId) => {
         getBudgetPerformance(Transaction, userId, 365)
     ]);
 
-    console.log('📊 Insight Data Summary:', {
+    console.log('Insight Data Summary:', {
         monthlyDataCount: monthlyData.length,
         categoryDataCount: categoryData.length,
         merchantDataCount: merchantData.length,

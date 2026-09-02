@@ -15,8 +15,6 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     console.warn(`Skipped ${emails.length - withText.length} emails with no rawText`);
   }
 
-  // Safety-net dedupe (fetchEmails already skips known gmailMessageIds, this
-  // guards against a race with a concurrent sync for the same user).
   const ids = withText.map(e => e.gmailMessageId);
   const existing = ids.length
     ? await Transaction.find({ gmailMessageId: { $in: ids } }).select('gmailMessageId')
@@ -28,8 +26,6 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     console.log(`Skipped ${withText.length - newEmails.length} duplicate emails`);
   }
 
-  // ONE (or a few, chunked) Gemini call(s) for ALL new emails in this sync,
-  // instead of a sequential per-email call. This is the dominant latency win.
   const parsedByGmailId = await parseEmailBatch(newEmails);
 
   const toInsert = [];
@@ -55,14 +51,11 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
     });
   }
 
-  // Bulk insert instead of one Transaction.create() per email.
   let savedTransactions = [];
   if (toInsert.length) {
     try {
       savedTransactions = await Transaction.insertMany(toInsert, { ordered: false });
     } catch (err) {
-      // With ordered:false, valid docs still get inserted even if some hit the
-      // unique gmailMessageId index (e.g. a race with a concurrent sync).
       if (err.insertedDocs) {
         savedTransactions = err.insertedDocs;
         console.warn(
@@ -77,8 +70,6 @@ export const syncUserEmails = async (authClient, user, limit = 100) => {
 
   console.log(`Saved ${savedTransactions.length} transactions for ${user.email}`);
 
-  // Always create a sync log to track when we last checked
-  // This prevents re-querying the same emails repeatedly
   await SyncLog.create({
     user: user._id,
     fetchedAt: new Date(),

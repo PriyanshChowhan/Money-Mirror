@@ -5,6 +5,8 @@ import FinancialInsights from './pages/Insights.jsx'
 import AIInsightsPage from './pages/AiInsights.jsx'
 import Transactions from './pages/Transactions.jsx'
 import Layout from './components/Layout.jsx'
+import PrivacyPolicy from './pages/PrivacyPolicy.jsx'
+import TermsOfService from './pages/TermsOfService.jsx'
 import { Routes, Route } from 'react-router-dom';
 import NotFound from './pages/NotFound.jsx'
 import './App.css'
@@ -14,6 +16,11 @@ function App() {
     <>
       <Routes>
         <Route path="/" element={<Login />} />
+
+        {/* Public legal pages required for Google OAuth */}
+        <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
+
         <Route element={<PrivateRoutes />}>
           <Route element={<Layout />}>
             <Route path="/ai" element={<AIInsightsPage />} />
