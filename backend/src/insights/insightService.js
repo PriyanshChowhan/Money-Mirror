@@ -49,15 +49,15 @@ const getCategoryAnalysis = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    console.log('🔍 Category Analysis Debug:', {
+    console.log('Category Analysis Debug:', {
         userId,
         startDate,
         days
     });
 
     const allTransactions = await Transaction.find({ user: userId }).lean();
-    console.log('📊 Total user transactions:', allTransactions.length);
-    console.log('📊 Sample transaction:', allTransactions[0]);
+    console.log('Total user transactions:', allTransactions.length);
+    console.log('Sample transaction:', allTransactions[0]);
 
     const result = await Transaction.aggregate([
         {
@@ -114,7 +114,7 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    console.log('🔍 Merchant Analysis Debug:', {
+    console.log('Merchant Analysis Debug:', {
         userId,
         startDate,
         days
@@ -211,15 +211,6 @@ const getMerchantAnalysis = async (Transaction, userId, days = 30) => {
     return result;
 };
 
-// ================================
-// 1b. RECURRING SUBSCRIPTION DETECTION (deterministic, no AI)
-// ================================
-//
-// Goal: if a merchant charges the same (or near-same) amount on a
-// recognizable cadence - e.g. "₹500 to Netflix roughly every 30 days" -
-// flag it as a subscription automatically, without the user ever typing
-// it into a form. This runs on raw transaction history and produces a
-// confidence score per merchant.
 const detectRecurringSubscriptions = async (Transaction, userId, days = 365) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
@@ -318,9 +309,6 @@ const detectRecurringSubscriptions = async (Transaction, userId, days = 365) => 
     return candidates.sort((a, b) => b.confidence - a.confidence);
 };
 
-// Upserts detected recurring charges into the Subscription collection so
-// they appear automatically - no manual entry required. Manually-created
-// subscriptions and anything the user dismissed are left untouched.
 const syncDetectedSubscriptions = async (Transaction, Subscription, userId) => {
     const candidates = await detectRecurringSubscriptions(Transaction, userId);
     const result = { created: 0, updated: 0, skipped: 0, candidatesFound: candidates.length };
@@ -373,10 +361,6 @@ const syncDetectedSubscriptions = async (Transaction, Subscription, userId) => {
     return result;
 };
 
-// Raw (non-AI) subscription insight for the /raw/subscriptions endpoint:
-// runs detection, syncs it into the DB, then returns a dashboard-ready
-// payload - active subscriptions, upcoming renewals, newly detected items
-// still awaiting user confirmation, and a monthly/yearly cost rollup.
 const getSubscriptionRawInsights = async (Transaction, Subscription, userId) => {
     await syncDetectedSubscriptions(Transaction, Subscription, userId);
 
@@ -420,8 +404,6 @@ const getSubscriptionRawInsights = async (Transaction, Subscription, userId) => 
     };
 };
 
-// Lets the user confirm a detected subscription ("yes, this is really a
-// subscription") or dismiss it ("no, stop flagging this merchant").
 const confirmSubscription = async (Subscription, userId, subscriptionId) => {
     return Subscription.findOneAndUpdate(
         { _id: subscriptionId, user: userId },
@@ -438,12 +420,11 @@ const dismissSubscription = async (Subscription, userId, subscriptionId) => {
     );
 };
 
-// Enhanced spending patterns with lifestyle insights
 const getSpendingPatterns = async (Transaction, userId, days = 30) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    console.log('🔍 Spending Patterns Debug:', {
+    console.log('Spending Patterns Debug:', {
         userId,
         startDate,
         days
@@ -530,45 +511,6 @@ const getSpendingPatterns = async (Transaction, userId, days = 30) => {
     return result;
 };
 
-// Budget performance analysis
-const getBudgetPerformance = async (Transaction, userId, days = 30) => {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days);
-
-    const categorySpending = await Transaction.aggregate([
-        {
-            $match: {
-                user: new mongoose.Types.ObjectId(userId),
-                date: { $gte: startDate },
-                amount: { $gt: 0 }
-            }
-        },
-        {
-            $group: {
-                _id: "$category",
-                totalSpent: { $sum: "$amount" },
-                transactionCount: { $sum: 1 },
-                avgDailySpending: { $avg: { $divide: ["$amount", days] } }
-            }
-        },
-        {
-            $project: {
-                _id: 0,
-                category: "$_id",
-                totalSpent: { $round: ["$totalSpent", 2] },
-                transactionCount: 1,
-                projectedMonthlySpending: { $round: [{ $multiply: ["$avgDailySpending", 30] }, 2] }
-            }
-        },
-        {
-            $sort: { totalSpent: -1 }
-        }
-    ]);
-
-    return categorySpending;
-};
-
-// Enhanced insights data generation
 const generateInsightData = async (Transaction, userId) => {
     console.log('Generating insight data for user:', userId);
     
@@ -576,22 +518,19 @@ const generateInsightData = async (Transaction, userId) => {
         monthlyData,
         categoryData,
         merchantData,
-        patternsData,
-        budgetData
+        patternsData
     ] = await Promise.all([
         getMonthlySpendingSummary(Transaction, userId, 12),
         getCategoryAnalysis(Transaction, userId, 365),
         getMerchantAnalysis(Transaction, userId, 365),
-        getSpendingPatterns(Transaction, userId, 365),
-        getBudgetPerformance(Transaction, userId, 365)
+        getSpendingPatterns(Transaction, userId, 365)
     ]);
 
     console.log('Insight Data Summary:', {
         monthlyDataCount: monthlyData.length,
         categoryDataCount: categoryData.length,
         merchantDataCount: merchantData.length,
-        patternsDataCount: patternsData.length,
-        budgetDataCount: budgetData.length
+        patternsDataCount: patternsData.length
     });
 
     return {
@@ -599,180 +538,8 @@ const generateInsightData = async (Transaction, userId) => {
         categoryData,
         merchantData,
         patternsData,
-        budgetData,
         currency: 'INR'
     };
-};
-
-// ================================
-// 1c. BUDGET OPTIMIZER (deterministic, no AI)
-// ================================
-//
-// Answers: "for my income and household size, how much SHOULD I be
-// spending per category, and how does that compare to what I actually
-// spend?" Groceries scale with headcount (a family of 4 needs more food
-// than a single person on the same income); everything else scales with
-// income as a %. All benchmarks are overridable per-user via
-// BudgetPreference.customAllocations.
-const BUDGET_BENCHMARKS = {
-    metro: { groceryPerAdult: 6000, groceryPerChild: 3500, rentPct: 30 },
-    tier2: { groceryPerAdult: 4500, groceryPerChild: 2800, rentPct: 25 },
-    tier3: { groceryPerAdult: 3500, groceryPerChild: 2200, rentPct: 20 }
-};
-
-// % of monthly income for categories that scale with earnings rather than
-// household size
-const INCOME_PCT_BENCHMARKS = {
-    utilities: 5,
-    transportation: 8,
-    healthcare: 5,
-    education: 8, // only applied when the household has children
-    entertainment: 5,
-    subscriptions: 3,
-    savings: 20
-};
-
-// Free-text keywords used to match a user's real transaction categories to
-// our benchmark buckets, so "actual" spend can be compared to "recommended"
-const CATEGORY_KEYWORD_MAP = {
-    groceries: ['grocery', 'groceries', 'supermarket'],
-    rent: ['rent', 'housing', 'mortgage'],
-    utilities: ['utility', 'utilities', 'electricity', 'water bill', 'gas bill', 'broadband', 'internet'],
-    transportation: ['transport', 'fuel', 'petrol', 'diesel', 'cab', 'uber', 'ola', 'metro', 'commute'],
-    healthcare: ['health', 'medical', 'pharmacy', 'doctor', 'hospital'],
-    education: ['education', 'school', 'tuition', 'childcare', 'daycare'],
-    entertainment: ['entertainment', 'dining', 'restaurant', 'movies', 'ott', 'leisure'],
-    subscriptions: ['subscription', 'subscriptions'],
-    savings: ['savings', 'investment', 'sip', 'mutual fund']
-};
-
-const matchActualSpend = (categoryData, keywords) => {
-    if (!keywords || !keywords.length) return 0;
-    return categoryData
-        .filter(c => keywords.some(k => (c.category || '').toLowerCase().includes(k)))
-        .reduce((sum, c) => sum + (c.totalSpent || 0), 0);
-};
-
-// Core optimizer: given income + household composition (+ optional real
-// category spend), produce a recommended monthly budget per category and
-// flag whether the user is over/under/on-track against it.
-const getBudgetOptimizerRecommendation = ({
-    monthlyIncome,
-    adults = 2,
-    children = 0,
-    cityTier = 'metro',
-    customAllocations = {},
-    categoryData = []
-}) => {
-    if (!monthlyIncome || monthlyIncome <= 0) {
-        throw new Error('monthlyIncome must be a positive number');
-    }
-
-    const benchmark = BUDGET_BENCHMARKS[cityTier] || BUDGET_BENCHMARKS.metro;
-
-    // Groceries scale with headcount, capped at 30% of income so it stays
-    // sane for lower incomes with larger families
-    const groceryRaw = adults * benchmark.groceryPerAdult + children * benchmark.groceryPerChild;
-    const groceryRecommended = Math.min(groceryRaw, monthlyIncome * 0.30);
-
-    const pctAmount = (key, fallbackPct) => {
-        const p = customAllocations[key] !== undefined ? customAllocations[key] : fallbackPct;
-        return Math.round(monthlyIncome * (p / 100) * 100) / 100;
-    };
-    const pctLabel = (key, fallbackPct) => customAllocations[key] !== undefined ? customAllocations[key] : fallbackPct;
-
-    const recommendations = {
-        groceries: {
-            recommended: Math.round(groceryRecommended),
-            basis: `₹${benchmark.groceryPerAdult}/adult + ₹${benchmark.groceryPerChild}/child (${cityTier} benchmark)`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.groceries)
-        },
-        rent: {
-            recommended: pctAmount('rent', benchmark.rentPct),
-            basis: `${pctLabel('rent', benchmark.rentPct)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.rent)
-        },
-        utilities: {
-            recommended: pctAmount('utilities', INCOME_PCT_BENCHMARKS.utilities),
-            basis: `${pctLabel('utilities', INCOME_PCT_BENCHMARKS.utilities)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.utilities)
-        },
-        transportation: {
-            recommended: pctAmount('transportation', INCOME_PCT_BENCHMARKS.transportation),
-            basis: `${pctLabel('transportation', INCOME_PCT_BENCHMARKS.transportation)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.transportation)
-        },
-        healthcare: {
-            recommended: pctAmount('healthcare', INCOME_PCT_BENCHMARKS.healthcare),
-            basis: `${pctLabel('healthcare', INCOME_PCT_BENCHMARKS.healthcare)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.healthcare)
-        },
-        education: {
-            recommended: children > 0 ? pctAmount('education', INCOME_PCT_BENCHMARKS.education) : 0,
-            basis: children > 0 ? `${pctLabel('education', INCOME_PCT_BENCHMARKS.education)}% of income` : 'no children in household',
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.education)
-        },
-        entertainment: {
-            recommended: pctAmount('entertainment', INCOME_PCT_BENCHMARKS.entertainment),
-            basis: `${pctLabel('entertainment', INCOME_PCT_BENCHMARKS.entertainment)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.entertainment)
-        },
-        subscriptions: {
-            recommended: pctAmount('subscriptions', INCOME_PCT_BENCHMARKS.subscriptions),
-            basis: `${pctLabel('subscriptions', INCOME_PCT_BENCHMARKS.subscriptions)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.subscriptions)
-        },
-        savings: {
-            recommended: pctAmount('savings', INCOME_PCT_BENCHMARKS.savings),
-            basis: `${pctLabel('savings', INCOME_PCT_BENCHMARKS.savings)}% of income`,
-            actual: matchActualSpend(categoryData, CATEGORY_KEYWORD_MAP.savings)
-        }
-    };
-
-    for (const val of Object.values(recommendations)) {
-        if (!val.recommended) { val.status = 'n/a'; continue; }
-        const diffPct = ((val.actual - val.recommended) / val.recommended) * 100;
-        val.diffPct = Math.round(diffPct);
-        if (diffPct > 15) {
-            val.status = 'over_budget';
-            val.message = `Spending ₹${Math.round(val.actual - val.recommended).toLocaleString('en-IN')} more than the benchmark`;
-        } else if (diffPct < -15) {
-            val.status = 'under_budget';
-            val.message = `₹${Math.round(val.recommended - val.actual).toLocaleString('en-IN')} of headroom left in this category`;
-        } else {
-            val.status = 'on_track';
-            val.message = `Within a healthy range of the ₹${Math.round(val.recommended).toLocaleString('en-IN')} benchmark`;
-        }
-    }
-
-    const totalRecommended = Object.values(recommendations).reduce((s, v) => s + v.recommended, 0);
-    const totalActual = Object.values(recommendations).reduce((s, v) => s + v.actual, 0);
-
-    return {
-        inputs: { monthlyIncome, adults, children, cityTier },
-        recommendations,
-        summary: {
-            totalRecommended: Math.round(totalRecommended),
-            totalActual: Math.round(totalActual),
-            unallocated: Math.round(monthlyIncome - totalRecommended),
-            currency: 'INR'
-        }
-    };
-};
-
-// Convenience wrapper: pulls real category spend for the user, merges it
-// with saved (or ad-hoc) BudgetPreference inputs, and returns the full
-// optimizer result - this is what the /budget-optimizer route calls.
-const getBudgetOptimizerForUser = async (Transaction, userId, { monthlyIncome, adults, children, cityTier, customAllocations }) => {
-    const categoryData = await getCategoryAnalysis(Transaction, userId, 30);
-    return getBudgetOptimizerRecommendation({
-        monthlyIncome,
-        adults,
-        children,
-        cityTier,
-        customAllocations,
-        categoryData
-    });
 };
 
 // ================================
@@ -837,7 +604,7 @@ For each insight, provide:
 Focus areas:
 - Spending growth opportunities and smart habits
 - Transaction pattern optimizations
-- Budget allocation improvements
+- Spending efficiency improvements
 - Financial goal achievement strategies
 
 Format as JSON array with this structure:
@@ -852,7 +619,7 @@ Format as JSON array with this structure:
       "Specific actionable step 2",
       "Specific actionable step 3"
     ],
-    "category": "budgeting",
+    "category": "spending",
     "impact": "high|medium|low",
     "timeframe": "immediate|short_term|long_term"
   }
@@ -871,7 +638,6 @@ const generateCategoryOptimizationInsights = async (model, data) => {
 You are a financial optimization specialist for PayWatch. Generate 3-4 smart category insights that help users optimize their spending.
 
 Category Analysis: ${JSON.stringify(data.categoryData)}
-Budget Performance: ${JSON.stringify(data.budgetData)}
 Currency: ${data.currency}
 
 FOCUS ON: Helping users make smarter spending decisions in each category.
@@ -1015,7 +781,6 @@ Focus on enhancing life quality through smart spending, not just saving money.
     return parseInsightResponse(result.response.text());
 };
 
-// Generate comprehensive actionable insights
 const generateComprehensiveInsights = async (Transaction, userId, geminiApiKey) => {
     try {
         const model = initializeGeminiModel(geminiApiKey);
@@ -1092,21 +857,14 @@ const calculateInsightPriority = (insight) => {
     return 'low';
 };
 
-// ================================
-// 3. ENHANCED SERVICE FUNCTIONS
-// ================================
-
-// Main function to generate comprehensive user insights
 const generateUserInsights = async (Transaction, userId, geminiApiKey) => {
     return await generateComprehensiveInsights(Transaction, userId, geminiApiKey);
 };
 
-// Get enhanced aggregated data for dashboard
 const getUserAggregatedData = async (Transaction, userId) => {
     return await generateInsightData(Transaction, userId);
 };
 
-// Generate quick daily insights
 const generateDailyInsights = async (Transaction, userId, geminiApiKey) => {
     try {
         const model = initializeGeminiModel(geminiApiKey);
@@ -1145,9 +903,6 @@ Format as JSON array with title, message, and 1-2 actionItems.
     }
 };
 
-// ================================
-// 4. ENHANCED ROUTE HANDLER
-// ================================
 
 const handleGenerateInsights = async (req, res) => {
     try {
@@ -1201,7 +956,6 @@ export {
     getCategoryAnalysis,
     getMerchantAnalysis,
     getSpendingPatterns,
-    getBudgetPerformance,
     generateInsightData,
 
     // Recurring subscription detection (deterministic, no AI)
@@ -1210,10 +964,6 @@ export {
     getSubscriptionRawInsights,
     confirmSubscription,
     dismissSubscription,
-
-    // Budget optimizer (deterministic, no AI)
-    getBudgetOptimizerRecommendation,
-    getBudgetOptimizerForUser,
 
     // Enhanced LLM functions
     initializeGeminiModel,

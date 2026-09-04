@@ -17,7 +17,6 @@ import {
 import { IndianRupee, Activity, Calendar, TrendingUp, ShoppingBag, Repeat, Clock } from 'lucide-react';
 import axios from 'axios';
 import SmartSubscriptions from './SmartSubscriptions.jsx';
-import BudgetOptimizer from './BudgetOptimizer.jsx';
 
 const FinancialInsights = () => {
   
@@ -307,9 +306,6 @@ const FinancialInsights = () => {
 
         {/* Smart subscription detection (deterministic - fixed amount + fixed cadence) */}
         <SmartSubscriptions />
-
-        {/* Budget optimizer - income & household size vs actual category spend */}
-        <BudgetOptimizer />
 
         {/* Category Details Table */}
         {categoryChartData.length > 0 && (

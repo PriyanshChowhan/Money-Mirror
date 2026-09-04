@@ -10,22 +10,15 @@ dotenv.config({
 import connect from '../db/connectDB.js';
 import Transaction from '../models/transaction.js';
 import Subscription from '../models/subscription.js';
-import BudgetPreference from '../models/budgetPreference.js';
 console.log(process.env.MONGODB_URI)
 
-// NOTE: nothing in this script calls Gemini. It only writes to MongoDB, so
-// it's safe to re-run as many times as you want while testing - it won't
-// touch your AI insight quota. The `/api/insights/ai` endpoint is the only
-// one that spends Gemini calls; the subscription detector and budget
-// optimizer added here are pure aggregation/math and are free to hit
-// repeatedly.
+// This script replaces the selected user's transactions and subscriptions
+// in MongoDB. Use a development database. It does not call Gemini.
 
 const userId = new mongoose.Types.ObjectId('6a661517999a5ad3ae2a4ede');
 
-// --- date helpers, all relative to "today" so the recurring-charge detector
-// (which looks at the last 365 days) and the budget optimizer (which looks
-// at the last 30 days) always have realistic data, no matter when you run
-// this script ---
+// Date helpers keep spending charts and the recurring-charge detector
+// supplied with recent transactions whenever this script runs.
 const monthsAgoOnDay = (monthsBack, dayOfMonth, hour = 12) => {
   const d = new Date();
   d.setDate(1); // avoid month-rollover weirdness (e.g. Jan 31 - 1 month)
@@ -71,7 +64,7 @@ for (let m = 0; m < 6; m++) {
 }
 
 // Rent: ₹18,000 on the 1st, for the last 8 months -> a big recurring
-// "subscription" that also exercises the rent/housing budget category
+// payment that also exercises the rent/housing spending category
 for (let m = 0; m < 8; m++) {
   recurringMonthly.push({
     user: userId, source: 'manual', amount: 18000, currency: 'INR',
@@ -117,8 +110,7 @@ const recurringYearly = [
 
 // ================================
 // 4. RECENT, CATEGORY-RICH SPENDING (last ~30 days)
-//    - this is what the Budget Optimizer compares your recommended budget
-//    against, so every benchmark category needs at least one entry here
+//    - populates the dashboard and category breakdown with varied expenses
 // ================================
 const recentSpending = [
   // Groceries
@@ -168,10 +160,9 @@ const mockTransactions = [
 ];
 
 // ================================
-// 6. OPTIONAL: a manually-entered subscription + a saved budget preference
+// 6. OPTIONAL: a manually-entered subscription
 //    - lets you verify that syncDetectedSubscriptions() never overwrites a
-//    subscription the user entered themselves (source: 'manual'), and that
-//    the Budget Optimizer pre-fills from a saved preference on first load
+//    subscription the user entered themselves (source: 'manual')
 // ================================
 const seedManualSubscription = {
   user: userId,
@@ -186,15 +177,6 @@ const seedManualSubscription = {
   userConfirmed: true
 };
 
-const seedBudgetPreference = {
-  user: userId,
-  monthlyIncome: 85000,
-  currency: 'INR',
-  adults: 2,
-  children: 2,
-  cityTier: 'metro'
-};
-
 const seedData = async () => {
   try {
     await connect(`${process.env.MONGODB_URI}/moneymirror`);
@@ -206,10 +188,6 @@ const seedData = async () => {
     await Subscription.deleteMany({ user: userId });
     await Subscription.create(seedManualSubscription);
     console.log('Seeded 1 manual subscription (Netflix) to test manual-vs-detected merge behavior.');
-
-    await BudgetPreference.deleteMany({ user: userId });
-    await BudgetPreference.create(seedBudgetPreference);
-    console.log('Seeded a budget preference (₹85,000/mo, 2 adults, 2 children, metro).');
 
     console.log('Mock data seeded.');
     process.exit(0);
